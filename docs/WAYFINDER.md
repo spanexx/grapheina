@@ -129,6 +129,14 @@ Decisions-so-far below only gists and links.
 
 <!-- the index — one line per closed ticket -->
 
+- [The release contract - what software must provide to deploy itself](tickets/17-release-contract.md) -
+  **One contract, one required field: where does deployment happen.** If nowhere, GRAPHEINA offers
+  to set it up; if somewhere, **it steps aside and calls yours** - because most projects already
+  deploy themselves, and a tool that shows up and ships its own way is an intruder. It **detects**
+  the existing mechanism (Dockerfile, fly.toml, a Makefile target, a workflow) and **proposes it -
+  never fires it**. Knowing it worked: use the project's own health check, else run a written
+  erify step, else say **UNVERIFIED**. No evidence, no claim - ticket 01's rule one level up.
+
 - [What environments must the factory actually run in?](tickets/14-support-matrix.md) —
   **Two places where things run.** The factory is a single binary that runs anywhere — no Node, no
   Python, no Docker needed to run *it*. Only the **sandbox** varies, and it takes the best rung it
@@ -316,40 +324,67 @@ Ruled beyond the destination. Never graduates.
 
 ## Tickets
 
-### Frontier — takeable now
+**23 of 24 closed.** Every decision that can be settled on paper has been. The remaining one is a
+run, not a decision.
+
+### Closed — decisions
 
 | # | Ticket | Type | Mode |
 |---|---|---|---|
-| [18](tickets/18-intent.md) | Intent — how does the factory know what the app is supposed to do? | grilling | HITL **largest hole** |
-| [21](tickets/21-scaffolding.md) | Scaffolding — what does the factory do with an empty directory? | grilling | HITL 🆕 |
-| [21](tickets/21-scaffolding.md) | Scaffolding — what does the factory do with an empty directory? | grilling | ✅ done |
-| [23](tickets/23-adoption.md) | Adopting the factory into an existing project | grilling | HITL 🆕 |
-| [14](tickets/14-support-matrix.md) | What environments must the factory actually run in? | grilling | HITL |
-| [17](tickets/17-release-contract.md) | The release contract — what software must provide to deploy itself | grilling | HITL |
-| [03](tickets/03-vercel-sandbox-api.md) | Can a Vercel Sandbox host a long-running agent? | research | ✅ done |
-| [04](tickets/04-playwright-in-sandbox.md) | Does Playwright work inside a Docker sandbox on Windows? | research | ✅ done |
-| [06](tickets/06-windows-worktree-docker.md) | What breaks with git worktrees on Windows + Docker? | research | ✅ done |
-| [07](tickets/07-multi-agent-image.md) | Can one image carry Claude, OpenCode and Codex? | research | ✅ done |
-| [20](tickets/20-session-formats.md) | Session formats across agents — what can be normalised | research | ✅ done |
+| [01](tickets/01-finding-format.md) | What does a factory Finding actually look like? | grilling | closed |
+| [02](tickets/02-branch-strategy.md) | What happens to a branch when the Builder finishes? | grilling | closed |
+| [08](tickets/08-rust-script-boundary.md) | Where exactly does the Rust/script line fall? | grilling | closed |
+| [09](tickets/09-scout-detection.md) | How does Scout detect what kind of app it is looking at? | grilling | closed |
+| [10](tickets/10-probe-matrix.md) | Which Probes are valid for which app types? | grilling | closed |
+| [11](tickets/11-reviewer-rules.md) | How does the Reviewer judge, and what makes it say no? | grilling | closed |
+| [12](tickets/12-loop-controller.md) | What triggers a Cycle, and what happens when one fails? | grilling | closed |
+| [13](tickets/13-on-disk-layout.md) | What lives on disk under the config directory? | grilling | closed |
+| [14](tickets/14-support-matrix.md) | What environments must the factory actually run in? | grilling | closed |
+| [15](tickets/15-untrusted-repro.md) | The Repro is executable code built from untrusted output | grilling | closed |
+| [16](tickets/16-harness-contract.md) | What exactly must a Harness be able to do? | grilling | closed |
+| [17](tickets/17-release-contract.md) | The release contract - what software must provide to deploy itself | grilling | closed |
+| [18](tickets/18-intent.md) | Intent - how does the factory know what the app is supposed to do? | grilling | closed |
+| [19](tickets/19-agent-layer.md) | The agent layer - who owns the session, who picks the model? | grilling | closed |
+| [21](tickets/21-scaffolding.md) | Scaffolding - what does the factory do with an empty directory? | grilling | closed |
+| [22](tickets/22-repo-ethics.md) | Repo ethics - how the code is written | grilling | closed |
+| [23](tickets/23-adoption.md) | Adopting the factory into an existing project | grilling | closed |
+| [24](tickets/24-doctor.md) | The Doctor - one command for the health of the whole system | grilling | closed |
 
-### Blocked
+### Closed — research
+
+| # | Ticket | Type | Mode |
+|---|---|---|---|
+| [03](tickets/03-vercel-sandbox-api.md) | Can a Vercel Sandbox host a long-running agent? | research | closed |
+| [04](tickets/04-playwright-in-sandbox.md) | Does Playwright work inside a Docker sandbox on Windows? | research | closed |
+| [06](tickets/06-windows-worktree-docker.md) | What breaks with git worktrees on Windows + Docker? | research | closed |
+| [07](tickets/07-multi-agent-image.md) | Can one sandbox image carry Claude, OpenCode and Codex together? | research | closed |
+| [20](tickets/20-session-formats.md) | Session formats across agents - what can be normalised | research | closed |
+
+### Open
 
 | # | Ticket | Type | Blocked by |
 |---|---|---|---|
-| [08](tickets/08-rust-script-boundary.md) | Where exactly does the Rust/script line fall? | grilling | 14 |
-| [10](tickets/10-probe-matrix.md) | Which probes are valid for which app types? | grilling | 09, 16 |
-| [12](tickets/12-loop-controller.md) | What triggers a cycle, and what happens when one fails? | grilling | 14 |
-| [13](tickets/13-on-disk-layout.md) | What lives on disk under `.factory/`? | grilling | 17, 18 |
-| [16](tickets/16-harness-contract.md) | What exactly must a Harness be able to do? | grilling | 09 |
-| [05](tickets/05-load-capacity.md) | How does the Scout report load capacity honestly? | grilling | 10 — later, post-deployment |
+| [05](tickets/05-load-capacity.md) | How does the Scout report load capacity honestly? | grilling | a **run**, not a decision - needs a real measurement and a plugin slot |
 
 ---
 
 ## Delivery routing
 
-This map is **planning** — it resolves decisions, not deliverables. When the frontier empties
-and the way is clear, the last resolution carries a routing tag:
+This map is **planning** - it resolves decisions, not deliverables.
 
-- `delivery: feature-pipeline` → requirements are sharp enough for GRILL → PRD-TRD → IMPL
-- `delivery: small-change` → narrow change, no design ambiguity
-- `delivery: decision-only` → the answer was the deliverable
+- delivery: feature-pipeline -> requirements are sharp enough for GRILL -> PRD-TRD -> IMPL
+- delivery: small-change -> narrow change, no design ambiguity
+- delivery: decision-only -> the answer was the deliverable
+
+## Where the map stands
+
+**The way is clear.** Nothing here is blocked on another ticket. What remains is not more thinking -
+it is the first Cycle.
+
+**The Doctor would earn its keep immediately.** `cargo` and `rustc` are not installed on this
+machine; ticket 24 defines exactly how the factory discovers that, reports it, and recommends the
+install without doing it.
+
+**The first real target is Sandcastle**, the reference implementation in
+`factory/sandcastle`. It is the only codebase here with a real Harness already understood, which
+makes it the honest first Cycle rather than a synthetic one.

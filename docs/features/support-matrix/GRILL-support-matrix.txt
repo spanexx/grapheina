@@ -135,3 +135,26 @@ None. The name touched binary, config directory, skills and config file, all of 
 mechanical follow-on work rather than decisions.
 
 No remaining open questions
+---
+
+## Correction - "static" was the wrong word
+
+The resolution said "a single static binary per platform". The **binary-per-platform** part is
+right. **"Static" is wrong, and it hides a real trap.**
+
+**Runtime-free, not static-free.** No language runtime - no Node, no Python, no Docker - is the
+**hard requirement**, and it is fully achievable. Whether the binary is *statically linked* is an
+implementation choice.
+
+The trap: **static-linking glibc breaks name resolution.** A program that cannot resolve a
+hostname works fine against a database and fails the moment it reaches the Vercel sandbox. That is
+a production-only bug.
+
+| Target | Link | Why |
+|---|---|---|
+| **Linux (musl)** | fully static | runs on every distribution regardless of its libc. **The safe default** |
+| **Linux (glibc)** | dynamic | faster to build, needs glibc >= the build machine's |
+| **macOS** | dynamic | system libraries are always present |
+| **Windows** | dynamic | system libraries are always present |
+
+**Linux is the only place the choice bites.**

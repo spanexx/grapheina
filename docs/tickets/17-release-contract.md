@@ -1,9 +1,11 @@
 # 17 — The release contract: what every piece of software must provide
 
 **Type:** grilling
-**Status:** open
+**Status:** closed
 **Blocked by**: 02
-**Claimed by**: —
+**Claimed by**: opencode
+
+**Findings:** [../features/release-contract/GRILL-release-contract.txt](../features/release-contract/GRILL-release-contract.txt)
 
 ## Question
 
@@ -123,3 +125,68 @@ not have yet, and a wrong automatic rollback is worse than a slow one.
 The universal release contract, the declaration format and where it lives, the automatic paths
 for each declared shape, the human's exact role, and what happens to software that cannot be
 deployed automatically.
+## Resolution
+
+### One contract, one required field
+
+**Not one method** (a single file and a running service share nothing) and **not several
+contracts** (every new kind would mean a new one the factory must know how to apply).
+
+The mechanism changes completely between a CLI tool and a service. **The question never does.**
+
+`
+   where does deployment happen?
+          |
+          ├── nowhere yet   ->  GRAPHEINA offers to set one up
+          └── somewhere     ->  GRAPHEINA steps aside and calls yours
+`
+
+### Handoff is the common case
+
+Most projects already deploy themselves - Azure, a Makefile, ly.toml, a CI pipeline.
+
+> **A tool that shows up and ships its own way is an intruder.**
+
+GRAPHEINA **detects** the existing mechanism rather than asking: Dockerfile means container,
+ly.toml means ly deploy, a Makefile deploy target means that, a workflow that deploys means
+that. **Detected, cached, overridable** - the same rule as Detectors, ethics and process.
+
+### It proposes, it does not fire
+
+> **If GRAPHEINA finds something, it proposes it. It does not just start running your deploy.**
+
+A factory that discovers a deploy command and fires it without asking is a factory that deploys to
+production on its own. A different, and much more dangerous, product.
+
+### Knowing it worked
+
+| | |
+|---|---|
+| **A** | the project already has a health check - use it |
+| **B** | a erify step is written down - run it |
+| **C** | neither exists - **deployed, UNVERIFIED** |
+
+**C is not a failure, it is an honest report.** A machine quietly assuming success is the exact
+thing this project was built to stop.
+
+**This is ticket 01's rule one level up: a deployment is a Finding-shaped claim. No evidence, no
+claim.**
+
+### The shape
+
+`yaml
+# grapheina.yaml
+name: myapp
+deploy:
+  how:     handoff        # grapheina | handoff
+  command: fly deploy
+  verify:  GET /healthz -> 200
+`
+
+**The file rule:** if a field needs a paragraph to understand, it belongs in the pack, not the
+file. Packs are for humans and may be long; **a deploy step cannot parse prose.**
+
+### The principle, arriving for the third time
+
+The factory adapts to the project - and here, **its success is often in not acting.** Same as
+ticket 22 (ethics adapt to the project) and ticket 23 (adoption adapts to the codebase).

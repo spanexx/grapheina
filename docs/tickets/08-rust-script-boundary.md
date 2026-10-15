@@ -1,7 +1,7 @@
 # 08 — Where exactly does the Rust/script line fall?
 
 **Type:** grilling
-**Status:** open
+**Status:** closed
 **Blocked by:** 02
 **Claimed by:** —
 
@@ -56,3 +56,48 @@ Rust owns **time and process tree**. Scripts own **git, docker, and the cloud AP
 Rust binary owns the **loop, lifecycle, and streaming**. Scripts stay **git and Docker only** —
 roughly ten files of five lines each. Agent invocation sits on the fence: a Rust trait if we
 want type safety, a script if we want one-file-per-agent.
+## Resolution
+
+### Everything in Rust. There is no line.
+
+Answer: **A.** Zero script dependency, one binary, one code path.
+
+### How this decision changed
+
+It started the session as Victor's own idea - *"use Rust to connect all the scripts"* - on the
+reason that scripts are readable and easy to drop in.
+
+**Ticket 14 overturned the premise.** If the factory must run everywhere, and bash is not on a
+default Windows install, then a binary depending on shell scripts **inherits the dependency it was
+supposed to remove.**
+
+And the performance argument for scripts never existed: Rust calling git and a shell calling
+git are the same system call running the same program.
+
+### What it gains
+
+> **One code path, identical on every machine.**
+
+With scripts allowed, a machine without bash behaves differently, and *"why did it work on
+mine?"* becomes a question that can never be answered once and for all. **That is a whole class of
+bug that only exists on some machines.** This decision makes it impossible.
+
+### What it costs - named, not buried
+
+- **Adding a new sandbox provider or agent means recompiling.** No more dropping a file in.
+- Iteration is slower than editing a five-line script.
+
+That was the part of the original idea that was genuinely good, and it is genuinely gone.
+
+### The way back, if it is wanted later
+
+A **plugin** - a separate small program talking to the factory over a pipe. Same extensibility,
+**no bash**. It does not need to exist in v1; the seam (the SandboxProvider and AgentProvider
+interfaces) should still be a real interface so that adding one is a crate, not a refactor.
+
+## Original notes
+
+### Recommendation to argue against
+
+Rust binary owns the **loop, lifecycle, and streaming**. Scripts stay **git and Docker only** -
+roughly ten files of five lines each. Agent invocation sits on the fence.

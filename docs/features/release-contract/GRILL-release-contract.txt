@@ -1,0 +1,112 @@
+Release Contract - Grill Notes
+
+Status: Locked
+Date: 2026-10-13
+Source: wayfinder ticket 17 - "The release contract: what every piece of software must provide"
+
+What this ticket is about
+
+- Approval is not shipping. What every piece of software hands over so deployment is automatic.
+- Not: where code lands (ticket 02), or what is checked before it ships (tickets 01, 11).
+
+The problem
+
+> Victor: *"we should also constitute and enforce a deployment process... it shouldn't be one
+> person... we should enforce the CI, we should enforce the deployment."*
+>
+> *"I need somebody to always have a log... the human should check, install the thing in a
+> particular environment... if it works well I will say okay it's time for deployment, and then they
+> should follow a particular workflow."*
+
+A factory that cannot ship what it builds is a very organised way of generating code.
+
+Questions and answers locked so far
+
+1. "the process is not fixed, the output is" - one contract
+
+Answer:
+- **One contract, several answers.** The shape is universal; the content is per-software.
+- Not one method (a single file and a running service share nothing), and not several contracts
+  (every new kind of software would mean a new contract, and the factory would have to know which
+  applies).
+
+Why:
+- The mechanism changes completely between a CLI tool and a service. **The question never does.**
+  It is always the same four questions: what is it called, how do I get it, how do I put it where
+  it belongs, how do I know it worked.
+- **One contract means the factory learns the questions once**, and a new kind of software is just
+  a new set of answers rather than a new language.
+
+2. "step out of the box" - the design corrected mid-session
+
+The first answer assumed GRAPHEINA does the deploying. That was wrong for most projects.
+
+> Victor: *"most applications might just drop GRAPHEINA inside their workspace... might already be
+> using another Azure-style of deployment."*
+
+**A tool that shows up and ships its own way is an intruder.** So the contract becomes **one
+required field, not four**:
+
+```
+   where does deployment happen?
+          |
+          ├── nowhere yet   ->  GRAPHEINA offers to set one up
+          └── somewhere     ->  GRAPHEINA steps aside and calls yours
+```
+
+**And it looks, rather than asks** - Docker file means container, `fly.toml` means `fly deploy`, a
+Makefile deploy target means that, a workflow that deploys means that. Same rule as everywhere
+else in this factory: **detected, cached, overridable.**
+
+The non-negotiable:
+
+> **If GRAPHEINA finds something, it proposes it. It does not just start running your deploy.**
+
+A factory that discovers a deploy command and fires it without asking is a factory that deploys to
+production on its own. That is a different, and much more dangerous, product.
+
+3. How it knows it worked
+
+Answer:
+- **A and B together, with C as the honest fallback.**
+
+```
+   does the project already have a health check or smoke test?
+     yes  ->  A. use it. most serious projects do.
+     no   ->  is a verify step written down?
+              yes  ->  B. run it
+              no   ->  C. deployed, UNVERIFIED
+```
+
+Why:
+- **C is not a failure, it is an honest report.**
+- A machine quietly assuming success is the exact thing this project was built to stop - and it was
+  never only about bugs. It was about something claiming a thing is fine when nobody checked.
+- **This is ticket 01's rule one level up.** A deployment is a Finding-shaped claim: no evidence,
+  no claim.
+
+The shape that resulted
+
+```yaml
+# grapheina.yaml
+name: myapp
+deploy:
+  how:     handoff        # grapheina | handoff
+  command: fly deploy     # what to run
+  verify:  GET /healthz -> 200
+```
+
+**The rule for the file:** if a field needs a paragraph to understand, it belongs in the pack, not
+the file. Packs are written for humans and are allowed to be long; **a deploy step cannot parse
+prose.**
+
+What this ticket produced
+
+- One contract, one required field: **where deployment happens**
+- **Handoff as the common case**, not the exception
+- Detection of an existing deploy mechanism, proposing rather than firing
+- **The honest "unverified" outcome**
+- The same principle as tickets 22 and 23, arriving a third time: **the factory adapts to the
+  project, and its success is often in not acting**
+
+No remaining open questions

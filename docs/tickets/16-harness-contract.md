@@ -1,7 +1,7 @@
 # 16 — What exactly must a Harness be able to do?
 
 **Type:** grilling
-**Status:** open
+**Status:** closed
 **Blocked by**: 09
 **Claimed by:** —
 
@@ -83,3 +83,58 @@ and does anything detect that, or does the Scout fail confusingly until a human 
 
 The Harness contract as a numbered list of capabilities, the boot timeout and failure
 behaviour, the dependency policy, and an answer on whether the Scout may write one.
+## Resolution
+
+### When the app doesn't come up - A, B or C: **C**
+
+`
+   the app doesn't come up
+        |
+        +-- did the files detection read change?
+        |      yes --> the Harness is stale --> fix it, start again
+        |      no  --> keep going
+        |
+        +-- nothing changed, still won't start --> it's the app. report it.
+`
+
+**And if it genuinely cannot tell: say which one it thinks, and say it is not sure.** The failure
+that matters is silence - a factory that skips a broken app and reports "no findings" is
+indistinguishable from a factory that found nothing.
+
+Same rule, third appearance: **ticket 09 blind spots, ticket 17 unverified, now here.**
+
+### The rest of the contract
+
+| # | Capability | Decision |
+|---|---|---|
+| 2 | **ready** | how it knows the app has finished starting: the port answers, a log line appears, or a health endpoint returns |
+| 3 | **alive** | a check between Probes - an app that died mid-run is a **Finding**, not a silent zero |
+| 4 | **reset** | already settled in ticket 01: throwaway baseline, repo-provided script as the upgrade, **no reset means read-only, and state-changing Probes are skipped** |
+| 5 | **dependencies** | the Harness starts what the repo declares, and says so plainly if it cannot |
+| 6 | **teardown** | everything it started, it stops - **on every path, including when killed mid-Cycle** |
+
+**Number 6 is the one to watch.** A Harness that leaks a database container every Cycle fills a
+machine in an afternoon, and an autonomous loop will not notice because nothing tells it.
+
+### Graduated
+
+**[24 - The Doctor](24-doctor.md)** - every check this contract implies is registered with a
+single grapheina doctor command, which also owns installation. **It may draft; it never touches
+your machine without asking** - one rule, enforced in one place, in the only component that
+actually modifies anything.
+
+## Original notes
+
+### What we already know
+
+From ticket 01:
+- The app must **boot** to a known state and be **resettable** to it
+- Baseline reset is throwaway; upgrade is a repo-provided script
+- No reset -> the Scout degrades to looking without touching, and skips any Probe that changes data
+
+From ticket 09:
+- Detection reads signals, decides the app kind, and caches the answer in harness.yaml
+
+From ticket 04:
+- Browser Probes need a Linux container with Playwright baked in
+- --init and --ipc=host are mandatory flags
