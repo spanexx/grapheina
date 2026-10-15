@@ -1,0 +1,134 @@
+Branch Strategy - Grill Notes
+
+Status: Locked
+Date: 2026-10-13
+Source: wayfinder ticket 02 - "What happens to a branch when the builder finishes?"
+
+What this ticket is about
+
+- Where the Builder's commits go, who lands them, and what happens when the merge is refused.
+- Not: the review process itself (ticket 11), how the loop is driven (ticket 12), or how
+  software is deployed once approved (ticket 17).
+
+Background the session had to establish first
+
+Victor did not arrive with "branch strategy" in mind - he arrived with the goal: agents that
+work in isolation without colliding, ending up on main. The three shapes had to be drawn out:
+
+  1. work on main directly      - nothing to merge, nothing protecting you
+  2. a temporary branch, merged back - protection, and main moves when the work is done
+  3. a named branch that stays   - no merge; the branch waits for a human
+
+Everything after that is question 3.
+
+Questions and answers locked so far
+
+1. "Yeah, so I am drawn to D2"
+
+Answer:
+- D: the Factory merges into main only when main has not moved since the branch was taken.
+- If it refuses, rebase onto the new main and retry - once. Only then does a merge agent step in.
+
+Why:
+- The realistic collision is not "one agent writes bad code" - the reviewer catches that. It is
+  two agents branching from the same snapshot and merging at different times, so the second one
+  lands against a main it has never seen.
+- D refuses rather than resolves. A refusal is not a failure and says why.
+- Rebase first because a rebase very often dissolves the conflict by itself, and starting the
+  whole task over throws away work that was probably fine. One retry keeps this cheap and bounded.
+
+2. "I think we need two branches. There should be a master branch and main branch."
+
+Answer:
+- main is the machine branch. The factory merges here automatically and CI runs.
+- master is the human branch. Nothing touches it but Victor.
+- When main is green, the factory opens main -> master by itself.
+- Victor installs it where it belongs, uses it, approves, merges, and bumps the version.
+- master is the released version - the one he trusts.
+- Per-repo, not a shared release line.
+
+Why:
+- "If the factory is building something physical, a machine cannot be the last check." Master is
+  where a human's judgement is the final word, not a formality.
+- Declaring master as the released version makes "which version do we trust" answerable without
+  asking.
+- A shared release line across repositories is a distribution problem, not a branch problem, and
+  solving it here would block this ticket for no gain.
+
+3. "we haven't really come up with one solution to not colliding... I have a concept that I use"
+
+Answer:
+- Conflicts are predicted from declared file lists, not discovered after the fact.
+- The feature pack already declares them. IMPL is a phase checklist; surgical-change step 2a
+  requires a file inventory in the handoff. A human reads those to resume after a cut-off
+  session. The factory reads the same lists to know which two agents are about to touch the same
+  lines.
+- Before an agent starts: read its list, compare against every other running job. No overlap ->
+  full speed. Overlap -> take turns.
+- After an agent finishes: compare what it actually changed against what it declared. A file
+  outside the declaration is itself a signal.
+- Short files are a throughput rule, not a style rule. Long files mean large overlap sets mean
+  fewer parallel jobs. The 350-line cap should be treated as a Finding by the Scout.
+
+Why:
+- This was the insight the whole discussion was circling. Small files is only one answer to
+  "how do agents not collide"; declaring scope is the general one, and it is already produced by
+  the existing workflow.
+- Predicted collisions can be scheduled around. Discovered collisions can only be survived.
+
+4. "all these are rules that I want us to keep, but I want it to be embedded in the system of
+    factory... enforced as a rule of law"
+
+Answer:
+- Two rules, both checkable: every feature has a pack; every surgical change updates the docs it
+  affects.
+- A rules reviewer checks them. It does not judge code quality.
+- Deployment and CI are enforced the same way.
+
+Why:
+- A rule that lives only in an instructions file does not survive. One agent skips it, nothing
+  catches it, and the codebase quietly drifts from its docs - which is exactly what the existing
+  surgical-change workflow was built to prevent.
+- Process compliance and code quality are different questions and should not be answered by the
+  same agent with the same context.
+
+5. "if it needs more, it should be able to get more... So each one can test at a particular
+    place"
+
+Answer:
+- Every role is a small team of focused agents, not one agent with a large brief.
+- When one cannot finish it recruits, with a written request naming how many and where:
+  count, reason, and the specific places.
+- Automated. No human picks the answer.
+- The Builder is several agents in one sandbox, sequenced, each starting where the last stopped.
+- The count is a measurement - tasks that always need splitting are telling you about the shape
+  of the code.
+
+Why:
+- A small-context agent doing one job beats a large-context agent doing five. This is quality per
+  token, not cost per token.
+- "I need help" is a shrug; "I need three, here are the three places" is a plan a machine can act
+  on. The written form also means nobody can later argue the split was unreasonable.
+- Teams that are a fixed size are a setting. Teams that size themselves to the work are a
+  response to it.
+
+6. "rebase and retry, once" / per-repo master
+
+Answer: as recorded in question 1 and question 2.
+
+7. Deployment - raised here, moved elsewhere
+
+Answer:
+- Deployment is a separate concern from merging. Ticket 02 stops at "the human approved".
+- Raised as ticket 17.
+
+Why:
+- Victor's point: "a factory that cannot ship what it builds is just a very organised way of
+  generating code." That is a lifecycle gap, not a branch-strategy question, and burying it here
+  would have made this ticket unreadable.
+
+New questions this raised
+
+- None sharp enough to ticket beyond 11, 12 and 17, all recorded.
+
+No remaining open questions

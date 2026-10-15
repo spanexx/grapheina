@@ -1,0 +1,124 @@
+Finding Format - Grill Notes
+
+Status: Locked
+Date: 2026-10-13
+Source: wayfinder ticket 01 - "What does a factory finding actually look like?"
+
+What this ticket is about
+
+- What the Scout produces when it finds something, in a form the rest of the loop can trust.
+- The difference between a real Finding and a hallucinated one.
+- Not: how the Scout detects apps (ticket 09), what happens to the branch afterwards
+  (ticket 02), or where files live on disk (ticket 13).
+
+Questions and answers locked so far
+
+1. "should add a visual simulations of where(scenerios) it fails in run time"
+
+Answer:
+- A Finding is a script that re-enacts a real person's scenario against the real
+  application, plus evidence of where it went wrong.
+- Not a screenshot of a broken state. A re-enactment.
+- The Evidence is generated from the run, not written by the Scout, so it cannot drift
+  from what actually happened.
+
+Why:
+- A screenshot shows a moment. It does not show the sequence that led there, and it is
+  useless for software with no screen (a library function, a command line program).
+- Generated narration cannot lie. A Scout-written description can.
+
+2. "real scenerios are real run time scenerios but simulated."
+
+Answer:
+- The code is real. The world around it is simulated.
+- A real database, real services, real code paths, really executed - fed seeded data
+  and simulated third-party responses.
+- The Scout runs against a Simulation reset to a known Seed.
+
+Why:
+- This is the line between a factory that finds real bugs and one that finds bugs in its
+  own test harness. Fully synthetic tests pass in the factory and fail for users, which
+  is worse than finding nothing - it is confidently wrong.
+- A controlled world is also a controllable one. Seeding the random number generator and
+  freezing the clock make the "only happens once" bugs reproducible after all, so the
+  strict reproduction rule survives.
+
+3. "agreed with you rec." (on how the world gets reset before each run)
+
+Answer:
+- Baseline is throwaway: delete the container holding the data, start a new one.
+- Upgrade is a reset script the repo itself provides - faster, but only apps that have one.
+- No Seed at all means the Scout degrades to looking without touching, and skips any
+  Probe that changes data.
+- The Scout may write a Reset script for a repo that lacks one, but only as a proposed
+  change a human approves. Never in place.
+
+Why:
+- The throwaway approach needs almost nothing from the target repo, so it works on the
+  "any app" case. A seed script is nicer but is an ask, and asking every repo for one
+  before the factory can do anything defeats the point.
+- Absence of a Seed must degrade Scout rather than break it. Read-only Probes still
+  produce Findings.
+- The Scout improving its own working conditions is valuable, but silent autonomy is what
+  erodes trust the first time it picks wrong.
+
+4. "C" and "2" (on where the Repro ends up, and how many times it must fail)
+
+Answer:
+- The Builder proposes the Repro as a permanent test in the same pull request. A human
+  decides. It is never added silently.
+- It must fail twice in a row.
+
+Why:
+- Proposed rather than automatic, because the factory choosing what enters your test
+  suite without asking is the sort of quiet autonomy that costs trust.
+- Twice rather than three: twice still separates all three outcomes (failed both, failed
+  once, passed both) at acceptable cost. A thing that is flaky half the time still
+  fools you one time in four. Cheap to raise to three later if ghosts prove common.
+- Note the case this unlocked: a Repro that fails once and passes once is not a ghost,
+  it is a different Finding - "this only breaks sometimes", arguably the nastier bug,
+  because it only shows up for some users and nobody can pin it down.
+
+5. "keep the rule short. A definition that needs a paragraph stops getting read."
+
+Answer:
+- The definition is one sentence. The three outcomes fall out of it without separate rules.
+- Who writes the Repro, where the Demonstration is stored, and what happens to the branch
+  afterwards belong to tickets 09, 13 and 02 - not to the definition.
+
+Why:
+- Every role in the loop reads this rule. A rule that needs a paragraph stops being read,
+  and a rule nobody reads is not a trust mechanism.
+- Folding unrelated lifecycle rules into the definition would have made it a description
+  rather than a test.
+
+The rule
+
+> A Finding exists when the Scout has written a script that re-enacts a real person's
+> scenario against the real application, and that script has failed twice in a row on the
+> code as it stands today.
+
+Outcomes, falling from that sentence alone:
+
+  failed both runs      -> a Finding; the Builder gets it
+  failed one run        -> a Finding of unreliability; "this only breaks sometimes"
+  passed both runs      -> not a Finding; dropped
+
+What this ticket produced
+
+- The trust mechanism for the whole loop. The Scout is the only role that runs real code;
+  everything downstream reasons about text it cannot execute. A Finding that is not
+  reproducible is a ghost, and dropping ghosts is what stops main rotting.
+- A side benefit worth naming: if approved Repro-as-test lands, the factory does not just
+  fix bugs, it leaves the test suite better than it found it. Every bug that ever existed
+  is guarded.
+
+New questions this raised
+
+- The Repro is executable code written by an LLM from untrusted application output. That
+  is a much larger surface than a prose bug report. Where a prose report can lie, a repro
+  can execute. Promoted to ticket 15.
+- Boot and Reset are now both required of a Harness. Detection (ticket 09) must cover
+  more than "what kind of app is this". Promoted to ticket 16.
+
+No remaining open questions

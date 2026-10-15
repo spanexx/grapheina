@@ -1,0 +1,119 @@
+Scout Detection - Grill Notes
+
+Status: Locked
+Date: 2026-10-13
+Source: wayfinder ticket 09 - "How does Scout detect what kind of app it is looking at?"
+
+What this ticket is about
+
+- How the Scout works out, before any Probe runs, what kind of project it is looking at, how to
+  start it, how to reach it, and how to poke it.
+- Not: what a Probe does (ticket 10), or what a Harness must provide beyond these answers
+  (ticket 16).
+
+Background established first
+
+Before any of the five Probes can look at anything, four answers are needed:
+
+  1. What kind of thing is this?
+  2. How do I start it?
+  3. How do I reach it once it is running?
+  4. How do I poke it?
+
+Answering those four is the Harness. Detection is the Scout working them out by reading the
+project.
+
+The dangerous case, named at the start of the session
+
+A Scout that boots the wrong thing and tests it anyway will happily report problems that are not
+real - and a Finding that cannot be reproduced is dropped. So a mis-detected Scout does not
+produce bad Findings, it produces **no** Findings and reports success.
+
+  CONFIDENT          -> boot and probe            safe
+  UNSURE             -> stop and ask               safe
+  CONFIDENT AND WRONG -> boot the wrong thing,
+                        "test" it, find nothing,
+                        report success              the one that hurts
+
+> A Scout that silently tests nothing is worse than one that crashes, because you cannot tell
+> the difference.
+
+Questions and answers locked so far
+
+1. "a"
+
+Answer:
+- Five kinds: web page, service, command line program, library, worker.
+
+Why:
+- The smallest set that separates the Probes cleanly. Probe validity is what actually matters,
+  and the matrix falls out of it: usability is only real for a web page; security probing is
+  thin for command line programs and libraries, and that gap is better named than hidden.
+
+2. "a" - and the addition about running on part of a repo
+
+Answer:
+- Unsure -> stop, show what was read, offer the most likely guesses, let the human choose, write
+  the answer down, never ask again.
+- Addition: a Scout does not need the whole project understood, only the app it is testing. It
+  runs Probes on the parts it understands and says plainly what it skipped.
+
+Why:
+- B (guess and mark every Finding with low confidence) was rejected because a guess that gets
+  tested is indistinguishable from a guess that got it right. A disclaimer nobody reads is not
+  transparency.
+- Refusing outright (C) was rejected because most repositories are partly understandable, and
+  scoping honestly is better than doing nothing.
+- "I tested these and not those, here is why" is part of every report. A report that only lists
+  what it did is indistinguishable from one where everything failed quietly.
+
+3. "I see you mentioned about package.json file... You should know that most applications these
+    days use Rust, programming language, Python"
+
+Answer:
+- One Detector per ecosystem, loaded as plugins. Not one big detector with a table of languages.
+- Each Detector knows its own manifests (pyproject.toml / Cargo.toml / go.mod / package.json),
+  its own project layout, and its own start commands - which do not translate between
+  languages. `npm run dev`, `uvicorn app.main:app`, `cargo run`, `go run .`, `bin/rails s`.
+
+Why:
+- Building the design around package.json would have made JavaScript the factory's only
+  language, which contradicts "works on any app".
+- It also produced the answer to a problem the ticket had not identified: **the Scout can name
+  its own Blind spots.** A Scout holding Python, Rust and Go Detectors, handed a Ruby project,
+  can say a true thing - "no Detector for Ruby" - instead of guessing and quietly testing
+  nothing. That is the anti-goal of this ticket, arriving from an unexpected direction.
+- Small Detectors are small enough to be obviously right, and a new language is a new file
+  rather than a change to something that works.
+
+4. "agreed" (on staleness)
+
+Answer:
+- Each Detector records which files it actually read to decide.
+- The Scout hashes those files. If they changed, that Detector runs again.
+- If the boot fails, try once with a fresh detection. If that fails too, **the boot failure is
+  the Finding.**
+
+Why:
+- Precise and cheap. Reading one file to compare a hash costs nothing next to booting and
+  testing an app, and it beats re-detecting every time for no benefit.
+- The backstop matters because "my saved answer is out of date" and "your app does not start"
+  look identical from the outside and mean completely different things. Without the distinction
+  a genuinely broken app gets misfiled as a configuration problem and quietly skipped.
+
+Still open - not blocking this ticket
+
+- Which ecosystems ship in v1. Resolved: **JavaScript/TypeScript, Python, Rust, Go**.
+
+  Chosen by Victor after the ecosystem-plugin decision. Rust and Go both answer the kind question
+  from structure alone - `main.rs` versus `lib.rs`, `cmd/` versus no `main` - before a line of
+  code is read. A fifth Detector is a new file, and the Scout reports what it has, so a missing
+  ecosystem names itself rather than guessing.
+
+What this ticket produced
+
+- The vocabulary: Harness, Detector, Blind spot.
+- The rule that a Scout reports what it did **and** what it skipped, every time.
+- The structural answer to "how do we handle a language we don't have": name it, don't guess.
+
+No remaining open questions

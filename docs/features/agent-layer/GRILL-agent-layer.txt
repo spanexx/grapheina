@@ -1,0 +1,123 @@
+Agent Layer - Grill Notes
+
+Status: Locked
+Date: 2026-10-13
+Source: wayfinder ticket 19 - "The agent layer: who owns the session, and who picks the model?"
+
+What this ticket is about
+
+- Whether the factory launches agent programs, talks to model APIs, or both - and what each buys.
+- Why it exists: every agent must be resumable, a human must be able to steer a running one, and
+  the model must be chosen per task.
+
+Background that produced the ticket
+
+Raised during ticket 11 while working out how a human steers a running agent.
+
+> Victor: *"I don't think any agents should not have the capability of starting from where it
+> stopped... we should also have a room for a human to work with agents as an API. So you can just
+> add Claude, Anthropic's API, and you can select any model you want."*
+
+### A correction to the record
+
+It had been stated that `opencode`, `cursor` and `copilot` do not support resume, making steering
+unavailable for them.
+
+**That was wrong.** Sandcastle sets `captureSessions: false` on those providers - the capture code
+was never written, not that the session cannot be persisted. OpenCode's is SQLite; the others are
+files. If the factory holds it, it can resume it.
+
+Steering was never unavailable to three agents. It was an artefact of inheriting one
+implementation's unfinished work. **This is the second time this session that Sandcastle's
+limitations were mistaken for platform limits** - worth remembering whenever a reference
+implementation says something cannot be done.
+
+Questions and answers locked so far
+
+1. "just because I'm introducing API doesn't mean we should eliminate the agent that already have
+    harnesses"
+
+Answer:
+- Both, behind one interface. The API layer is alongside the CLI agents, not instead of them.
+- One interface, so no other ticket has to know which kind it is talking to.
+
+Why:
+- A CLI agent brings tools and a permission model the factory would otherwise have to reproduce.
+  The API layer brings ownership of the session. Neither dominates.
+- The five-event contract from ticket 07 already does most of the unifying work.
+
+2. "I think we should look at how these agents saved their sessions"
+
+Answer:
+- Canonical shape is **JSONL, `{role, content:[blocks]}`** - chosen on evidence, not invented.
+
+| Agent | Finding |
+|---|---|
+| Cline | stores `Anthropic.MessageParam[]` verbatim - zero work |
+| OpenCode | SQLite-only, but the schema is pinned in-file and the payload is already understandable. **First-class injection** via `session_inbox` |
+| Kilo Code | ships `/resume-claude` and `/resume-codex` - parsers for two known formats already exist elsewhere |
+| Cursor | **neglected.** Protobuf blobs behind two non-interchangeable ids, no bridge between them |
+| Copilot | no session locking |
+
+Why:
+- These tools converged on the same shape. It is the de-facto standard, so converting in and out
+  is mostly unwrapping metadata rather than translating a foreign format.
+- Inventing a new shape would have meant every reader learning twice - the Reviewer, the router,
+  and Victor. **Victor reads these sessions.**
+- Kilo Code shipping parsers for Claude and Codex means two formats are already solved by
+  somebody else, in a repo we can read.
+
+**Injection landmines recorded:** Cline's file watcher clobbers injected writes; Cursor's
+`--resume` clobbers the observed transcript.
+
+3. "since the session is already there, they can just resume from the session by taking a
+    summary of the session"
+
+Answer:
+- An API agent holds a list of messages **we own**, so it resumes exactly. Too long to send? Summarise.
+- **The summary is what travels between agents.** The full history stays with the agent that made
+  it; the summary belongs to nobody, because it is just words.
+- The summary mechanism **already exists** - the `handoff` skill, writing
+  `sessions/.last-handoff` with a `.handoff-log.md` breadcrumb trail.
+- The factory makes it event-driven: an agent that stops normally writes its own; an agent that is
+  killed mid-turn cannot, so the factory triggers a cheaper model to write it from the dead
+  session.
+
+Why:
+- This is what makes "even a different agent can resume" possible. It is lossy at the edges by
+  nature, which is worth stating plainly rather than discovering later.
+- The handoff already captures the human's steering note, so **steering crosses agents for free**.
+- The fallback path is the one that matters: an agent killed mid-turn is exactly the case where a
+  summary is most valuable and least available.
+
+4. "agreed"
+
+Answer:
+- **CLI first, for exactly one cycle.** Something runs end to end that Victor can watch. Then the
+  API layer, which improves everything else.
+
+Why:
+- The API layer is the better foundation, but it is also where design mistakes stay invisible
+  until weeks have been spent on them. One cycle of the simple version surfaces things that cannot
+  be learned any other way - what the Scout actually finds, how many Findings are ghosts, where
+  the Reviewer rejects and why.
+- Then the foundation changes underneath a working thing, rather than before anything works.
+
+Consequences for ticket 11
+
+Ticket 11's last open question - "is the Reviewer a different model from the Builder?" - is now
+answered by this ticket. Choosing a different model is choosing a different request target, which
+costs nothing extra once the factory owns the request. Separation of duties is therefore cheap,
+and should be used: same-model-different-context inherits the Builder's blind spots, which is
+exactly the failure ticket 11 exists to prevent.
+
+What this ticket produced
+
+- One interface, two implementations, and a five-event contract that already unifies them.
+- A canonical session shape that five existing tools already use.
+- A summary mechanism that already exists, now made event-driven.
+- The router, which is a few lines on top of owning the request rather than a separate system.
+- **A correction worth carrying:** a reference implementation's missing feature is not a platform
+  limit.
+
+No remaining open questions

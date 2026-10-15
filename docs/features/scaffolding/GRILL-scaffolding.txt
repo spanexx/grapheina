@@ -1,0 +1,110 @@
+Scaffolding - Grill Notes
+
+Status: Locked
+Date: 2026-10-13
+Source: wayfinder ticket 21 - "Scaffolding: what does the factory do with an empty directory?"
+
+What this ticket is about
+
+- The one case the map does not cover: a repository that does not exist yet. No bug to find, no
+  behaviour to preserve, no spec to check against.
+- Not: how anything is tested (tickets 01, 10), or what intent means (ticket 18).
+
+The case that breaks the map
+
+| | Existing repo | Empty directory |
+|---|---|---|
+| The Scout finds | a bug | **nothing yet** |
+| Behaviour to preserve | a pack, or the code | **none** |
+| The Reviewer checks against | a spec | **what?** |
+
+The Scout's competence and incompetence are exactly mirrored: superb at finding problems in a
+thousand-line codebase, useless at inventing the first version. Given an empty folder it produces
+something confident and arbitrary, because it has nothing to be wrong against.
+
+Questions and answers locked so far
+
+1. The correction
+
+Answer:
+- **There is no rigid rule on scaffolding.** The process is a **conversation**, not a form.
+- It uses the **wayfinder** skill, which already works: Victor talks with an agent until they both
+  know what the thing is supposed to be.
+- **No particular way to scaffold a particular software.** It depends on the agent and the human
+  deciding together.
+
+Why:
+- Every application is different, and the right questions only appear once you start asking. A
+  template would freeze the questions that matter most.
+- The first framing offered - "Victor states it and the factory builds it" - was a form, and a
+  form is the wrong shape for this.
+
+2. The fixed part
+
+Answer:
+> **The process is not fixed. The output is.**
+> **Every decision states how the thing should behave at runtime.**
+
+And the order matters:
+
+```
+1. wayfinder — talk it through with an agent      a conversation, not a form
+2. confirm the technical side                      what it is, which language, which Detector
+3. THEN enforce: every decision states its runtime behaviour
+```
+
+Why:
+- Behaviour is a different question from technology. You cannot tell someone what it should do
+  until you both know what it is - which is exactly why the technical side is confirmed first and
+  the behaviour enforced second.
+- The cup example generalises into the rule: *"the cup sits at the bottom of the hand"* is a
+  decision that carries its behaviour. Most decisions simply don't say it.
+
+3. "we should have something like an ethic that we follow and this should be a scaffold too"
+
+Answer:
+- **Repo ethics** exist, they are scaffolded with the project, `AGENTS.md` points agents at
+  them, and a Reviewer refuses work that breaks them.
+- Promoted to its own ticket - 22.
+
+Why:
+- Some of these are not questions at all. Nobody needs to be asked whether they want files under a
+  length. It goes in a list and everybody follows it.
+- **We have been inventing ethics piecemeal all through this map** - the long-file rule, the pack
+  rule, the no-secrets rule. Six of them are already enforced and none has a name or a home.
+
+### The finding that shapes it
+
+> Some ethics can be checked by a machine and some cannot.
+
+A file being 340 lines against a rule of 200 is a **fact**. "This code should be readable" is an
+**opinion**.
+
+**If both live in one list and the Reviewer may refuse either, the Reviewer learns to wave through
+the opinions to get to the facts — and then it stops refusing anything.** That is the failure mode
+ticket 15 named: a gate that blocks on vague suspicion gets disabled.
+
+### Proposed shape
+
+```
+docs/ethics/
+├── rules.yaml     data — a machine reads it and refuses. HARD.
+└── *.md           prose — guidance and aspiration. Never blocks.
+```
+
+A file-length rule in prose is a suggestion. The same rule in data is a rule.
+
+Graduated
+
+- **Ticket 22 - Repo ethics.** Where they live, the two tiers, who writes them, and what the
+  ethics Reviewer may refuse on.
+- **Ticket 21's enforcement rule** - every decision states its runtime behaviour — feeds ticket
+  22's mechanism and ticket 11's Reviewer.
+
+New questions this raised
+
+- Does a decision with no user-visible behaviour get to say "none - internal only"? If that is
+  allowed, it must never read the same as a stated behaviour, or it becomes a loophole. Carried
+  into ticket 22 as part of the enforcement question.
+
+No remaining open questions

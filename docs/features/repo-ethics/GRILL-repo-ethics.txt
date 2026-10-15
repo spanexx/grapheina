@@ -1,0 +1,132 @@
+Repo Ethics - Grill Notes
+
+Status: Locked
+Date: 2026-10-13
+Source: wayfinder ticket 22 - "Repo ethics: how the code is written"
+
+What this ticket is about
+
+- Behaviour is what the software *does* (ticket 18). **Ethics are how the code is written.**
+- They are separate because they are separate in effect: a file being 340 lines instead of 200
+  changes nothing for the user, and everything for the next agent.
+
+Why this is a generalisation, not a new idea
+
+Ethics were invented piecemeal through this map, without naming them:
+
+| Ethic | Decided in | Checkable? |
+|---|---|---|
+| Files under 350 lines | ticket 02 | yes |
+| Every feature has a pack | ticket 02 | yes |
+| Surgical changes update the docs they affect | ticket 02 | yes |
+| No inline credentials in a repro | ticket 15 | yes |
+| Approved tests run in CI | ticket 02 | yes |
+| Ambiguity named, never guessed | ticket 09 | judgement |
+| Behaviour right, not just correct | ticket 18 | judgement |
+
+**Six already enforced. None had a name or a home.**
+
+Questions and answers locked so far
+
+1. The badly-framed question, and the better answer it produced
+
+The question asked whether an agent may block on a prose rule or only on a measurable one. The
+worry: *"if you let a judge say 'this code isn't good enough', the judge will start saying that
+about everything, and then it stops meaning anything."*
+
+The answer came from a different direction - the comment ethic:
+
+> *"the builder should come back and correct it. it shouldn't just stop the flow... it doesn't
+> need a human in this loop if it's just the ethic. the reviewer can use the same session that it
+> was working on to correct these mistakes."*
+
+**A missing comment is not the same as being wrong.** Handing it back to the Builder costs a whole
+cycle for something that takes ten seconds.
+
+Which produced the thing the original question was reaching for:
+
+| Severity | Response | Cost |
+|---|---|---|
+| **Low** - missing comment, formatting, stray import | **fix in place**, same session | seconds |
+| **High** - wrong behaviour, missing pack | **hand back** to the Builder | a cycle |
+| **Critical** - intent unclear, behaviour contradicts the spec | **ask a person** | your time |
+
+This **revises ticket 11**, which had modelled rejection as the only response.
+
+> **The Builder always corrects. It does not stop.** Rejection is a hand-back with the context
+> still attached - not a dead end.
+
+2. "we should have something like an ethic that we follow and this should be a scaffold too"
+
+Answer:
+- **Two layers.** A **base** that ships with the factory and applies everywhere, and a **repo**
+  layer the project adds. The human changes whatever they disagree with - no configuration
+  ceremony, and the definitions are just text.
+
+**Six base ethics:**
+
+1. **Comment** - *why*, referencing the pack or surgical change. Base because the factory runs
+   both; the comment points at the factory's own work
+2. **File length cap** - and it is *throughput*, not style: long files serialise the factory
+3. **Every feature has a pack**
+4. **Surgical changes update the docs they affect**
+5. **No secrets, ever**
+6. **One job per module**
+
+**Naming is repo-level and reads from `CONTEXT.md`.** If the glossary calls it a *session*, the
+code calls it a session. Naming follows the project's language, not the other way round.
+
+The test: **would this still make sense for a project the factory has never seen?** Yes -> base.
+Depends on the project -> repo.
+
+3. "of course, the project can disagree with the base"
+
+Answer:
+- **Yes, and the disagreement is written down** - same place, with the reason beside it.
+
+```
+docs/ethics/
+├── base/          ships with the factory
+│   └── comments.md · file-length.md · packs.md · surgical-docs.md · no-secrets.md · one-job.md
+└── this-repo/     the project's own. Writable.
+    ├── naming.md
+    └── overrides.yaml
+```
+
+```
+# overrides.yaml
+file-length:
+  rule: 350
+  changed_to: 800
+  why: "A compiler pass is one cohesive unit; splitting it produces abstractions nobody wants."
+  agreed: 2026-10-13
+```
+
+Why:
+- **The failure mode is not that somebody disagrees.** A compiler and a CRUD app have different
+  shapes. **The failure mode is disagreeing quietly** - the default later looks arbitrary and
+  nobody remembers why.
+- **An override without a reason is a bug. An override with one is a decision.**
+- Works both ways: a project that *tightens* a rule records it the same way, so effort is visible.
+
+4. Checkable versus opinion
+
+```
+a file is 340 lines against a rule of 200    <- a FACT.  mechanically checked.
+"this code should be readable"               <- an OPINION. never blocks.
+```
+
+Only the fact tier blocks. A file-length rule in prose is a suggestion; the same rule in data is a
+rule. Same move as ticket 15 - prevention, not judgement.
+
+Graduated
+
+- **Ticket 23 - Adopting the factory into an existing project.** Raised by Victor during this
+  ticket. Scaffolding starts from nothing; adoption starts from everything. Checked: no existing
+  skill covers it.
+
+New questions this raised
+
+- What happens when the factory arrives at an active codebase. Cut as ticket 23.
+
+No remaining open questions

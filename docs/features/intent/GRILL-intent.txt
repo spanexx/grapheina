@@ -1,0 +1,140 @@
+Intent - Grill Notes
+
+Status: Locked
+Date: 2026-10-13
+Source: wayfinder ticket 18 - "Intent: how does the factory know what the application is supposed to do?"
+
+What this ticket is about
+
+- Where the application's intent lives, and what stops a change serving correctness while
+  contradicting intention.
+- Not: how any Finding is verified (ticket 01), or what a probe looks for (ticket 10).
+
+The hole
+
+Everything designed so far checks **correctness**:
+
+  - the Repro fails twice (ticket 01)
+  - the sanitiser passes (ticket 15)
+  - the test suite is green
+  - the code is clean
+
+**None of it asks whether the code is doing the right thing.**
+
+> Victor: *"There is something more important than getting the code right. And that is the
+> following intent of the application."*
+
+### The cup
+
+> Somebody asks for an app that holds a cup. The agent builds something that *technically* holds a
+> cup. Every test passes. Reviews clean.
+>
+> But maybe the cup should sit in the **bottom of the hand**, not the fingers. Maybe it should be
+> the **right** hand.
+>
+> The agent did not get that wrong because it is careless. It got it wrong because **nobody ever
+> wrote down which one was wanted.**
+
+So every gate says *yes to the wrong thing* - the silent degradation identified in ticket 11,
+arriving through a different door. Not wrong code, but **right code implementing an unstated
+intention**.
+
+> Victor: *"if the intent is clean, pure, [an agent] can do it."* - so the work is making the
+> intent clean before anything is built. **That is why wayfinder belongs earlier.**
+
+Questions and answers locked so far
+
+1. The correction that reframed the whole ticket
+
+Answer:
+- Intent is not a wall. A locked decision is locked **for now**, and is allowed to change.
+- When it changes, **that is not a mistake** - it is something that happened for a reason, and the
+  reason is the valuable part.
+
+Why:
+- The ticket opened by treating intent as a static gate that a change either serves or violates.
+  That framing is wrong. Real software's intent evolves, and the mechanism for that evolution is
+  already understood and already built.
+
+2. "I need to introduce you to Drift."
+
+Answer:
+- The **drift** skill is the mechanism, and it already exists.
+- Three artifacts: **Docs** (intent), **Code** (reality), **Drift log** (`docs/drift.md`).
+- Its own framing: *"Drift is not 'docs wrong, fix them.' It's 'here's the breadcrumb, here's who
+  reconciles.'"*
+
+Two rules that matter most:
+
+| Rule | Why it is right |
+|---|---|
+| **Nothing is ever deleted.** A drifted pack is **appended to** - "we decided this, then we ended up here, and this is why" | the history of a decision changing is more valuable than the decision |
+| **Every entry needs `doc path:line` AND `code path:line`** | no citations, no entry. **This is what makes drift a fact rather than an opinion** |
+
+Plus severity (Critical / High / Medium / Low), an owner, and `Verified by:` on resolution.
+Append-only in Resolved; never renumber.
+
+What Victor asked for, and where it landed:
+
+| Asked | Where it lives |
+|---|---|
+| log drift with a reason | the drift entry's `Why matters` |
+| never delete the original plan | append-only Resolved section |
+| amend the pack too | the IMPL "Open Drift" breadcrumb the skill already requires |
+| the human approves | the escalation gate below |
+| "can just log it as a drift and that's it" | logging is a **complete** outcome, not a failure state |
+| resumable later | an open drift entry is unfinished work with an owner |
+| drift on some things, land in the same product | the change is deliberate, not a re-decision |
+
+3. "c" - where drift gets detected
+
+Answer:
+- **The Reviewer** catches drift the moment it is created - the diff is already in front of it.
+- **A dedicated drift Probe** catches what accumulated while nobody was watching.
+
+Why:
+- The second half is what ticket 09 taught us by accident: a Scout that tests nothing is
+  indistinguishable from a Scout that found nothing. Drift that nobody reviews accumulates exactly
+  the same way.
+- The factory **proposes** doc edits and never applies them - the same rule as the reset script and
+  the harness. It may draft, a human approves. **Docs are the thing everything else trusts.**
+
+4. "c" - when does the factory stop and ask
+
+Answer:
+- **Everything proceeds. Drift catches the ones it got wrong.**
+
+Why:
+- Without drift, guessing wrong is permanent and invisible. With drift, guessing wrong is recorded
+  with a reason, an owner, and a way to fix it.
+- This is the trade Victor named directly: *"drift on some things and still land in the same
+  product."*
+- The cost is honest - some changes will be unwanted, and each costs a rollback. The mitigation is
+  not to guess less, it is that **High-severity drift becoming common is itself a visible signal**
+  that the Scout's judgement needs tuning. A factory whose High-drift rate rises has a problem you
+  can see.
+
+5. A repository with no pack at all
+
+Answer:
+- The Scout writes a **proposed baseline from the code's actual behaviour** and marks it
+  **observed** rather than **decided**. A human approves it once.
+- **Observed and decided must never look the same in the file.** An observed baseline is a
+  description; a decided one is an instruction.
+
+Why:
+- This is a different case from "behaviour not covered by a decision" - here there are no
+  decisions at all. "Correct" means "whatever the code already does."
+- Marking it honestly is what stops a snapshot of today's behaviour, bugs included, from silently
+  becoming the specification.
+
+Graduated
+
+- **Ticket 21 - Scaffolding.** An empty directory is a different job: no bug to find, no behaviour
+  to preserve, no spec to check against. Raised directly by Victor during this session.
+
+New questions this raised
+
+None sharp enough to ticket.
+
+No remaining open questions

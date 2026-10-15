@@ -1,0 +1,135 @@
+Adoption - Grill Notes
+
+Status: Locked
+Date: 2026-10-13
+Source: wayfinder ticket 23 - "Adopting the factory into an existing project"
+
+What this ticket is about
+
+- The factory arrives at a codebase that is already active, four years old, with no packs.
+- What it does, in what order, and what it refuses to touch.
+
+The finding that inverted the ticket
+
+> Victor: *"when the factory is dropped into a very busy, already gone codebase, the factory should
+> not try to change the code."*
+
+The ticket had assumed the factory arrives and **adapts the code**. It is the other way round.
+
+> **The code is not the problem.** Four years of work by people who knew what they were doing, and
+> it is the evidence of how this project actually thinks.
+
+```
+factory arrives
+     ├── does NOT touch the code
+     └── reads the code, then writes the ethics down: "this is the ethic here, this is how we do it, this is why"
+```
+
+Questions and answers locked so far
+
+1. The Doctor
+
+Answer:
+- **The Doctor is a kind of Reviewer whose only job is to notice when the code and the written
+  ethics have drifted apart.** Not to fix the code - to notice.
+- Once proven, the state is documented: *"this is the ethic, this is how it should be followed."*
+
+Why:
+- The ethics are what people learn from. **If they go out of date, every new agent learns the wrong
+  thing** - and no amount of enforcement fixes an instruction nobody can trust is accurate.
+
+2. The hard part - two kinds of ethics pulling opposite ways
+
+Answer:
+
+| | Which way it pulls |
+|---|---|
+| **Project ethics** - naming from `CONTEXT.md`, local conventions | the **system realigns to them** |
+| **Base ethics** - file cap, no secrets, one job per module | the **system adapts to them** |
+
+> *"It should not change the way that the system has been operating. It should get work that does
+> not conflict."*
+
+Why:
+- This is the whole distinction between a factory that asks a four-year-old project to change and
+  one that fits itself around it.
+- Project ethics are safe to enforce because the project chose them. Base ethics are rules the
+  factory itself runs on, so they cannot be enforced by changing the project.
+
+3. "the system should not be hard-coded to use the feature pipeline... it should be pluggable"
+
+Answer:
+- **The implementation process is a pluggable part** - the same pattern already used for Detectors
+  (per language) and ethics (per project).
+
+Why, and what it costs:
+
+| Rule | True only when... |
+|---|---|
+| *packs are law* | the project uses packs |
+| *a comment cites the pack* | the project uses packs |
+| *a Reviewer checks for a pack* | the project uses packs |
+
+> **In a project that does not use packs, that Reviewer has nothing to check.**
+
+The correction this forced:
+
+- The comment ethic - *"cite the pack or the surgical change"* - was written as a **base** rule.
+  That only means anything if the project uses packs. For one that does not, it instructs agents
+  to cite nothing.
+- **The six base ethics are not sacred.** They are a starting set.
+
+New shape:
+
+```
+docs/ethics/
+├── base/          what the factory needs to function
+│   └── no-secrets.md · one-job.md · file-length.md
+├── process/       only if the project HAS one of these
+│   └── packs.md            "every feature has a pack"
+│   └── comment-citation.md "comments cite the pack"
+└── this-repo/     detected from how the project actually works
+```
+
+**The Doctor does not impose a process. It notices which one is already there and applies the
+matching ethics.** The comment example falls out: a project that does not comment today gets
+advised, not failed.
+
+4. "c"
+
+Answer:
+- **Enforce only what can be detected. Silently ignore the rest.**
+
+Why:
+- Offering the process was rejected because the failure mode is the factory selling its house to a
+  project that did not ask.
+- **The factory adapts to the project, not the other way round** - and that principle has to apply
+  to process exactly as it applies to code.
+
+Corrections made to closed tickets
+
+| Ticket | Was | Now |
+|---|---|---|
+| [22](22-repo-ethics.md) | "comment cites the pack or surgical change" as a base ethic | conditional on the project using packs; **base shrinks to what the factory itself needs** |
+| [02](02-branch-strategy.md) | "packs are law" | true inside a process that uses packs; the rules Reviewer checks for a pack only exists where packs exist |
+
+The pattern that emerged
+
+Three things are now pluggable, all by the same shape - detected, cached, overridable:
+
+| | |
+|---|---|
+| **Detectors** | per language ecosystem (ticket 09) |
+| **Ethics** | base plus per project (ticket 22) |
+| **Implementation process** | per project (this ticket) |
+
+What this ticket produced
+
+- Adoption inverts: **the factory adapts itself, not the code**
+- **The Doctor** - a Reviewer that notices when code and written ethics diverge
+- Two directions of pull: project ethics pull the system toward them, base ethics pull work toward
+  the system
+- **The implementation process is pluggable**, which forced two corrections to closed tickets
+- C: enforce only what is detected, ignore the rest
+
+No remaining open questions

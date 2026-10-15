@@ -1,0 +1,137 @@
+Support Matrix - Grill Notes
+
+Status: Locked
+Date: 2026-10-13
+Source: wayfinder ticket 14 - "What environments must the factory actually run in?"
+
+What this ticket is about
+
+- Where the factory runs, what it can do there, and what it says when it lands somewhere less
+  capable than another.
+- Not: which sandbox providers exist (tickets 03, 06), or how the loop is driven (ticket 12).
+
+The reframe that reset the ticket
+
+The ticket opened as *"which machines do we promise to support?"* That is the wrong question.
+
+> Victor: *"we need something that runs everywhere... just like npm. I don't mind."*
+
+**There are two separate places where things run**, and conflating them made the ticket harder
+than it is:
+
+| | |
+|---|---|
+| **The factory itself** | runs on your machine, a VPS, Windows, macOS, Linux. **A single binary** |
+| **A sandbox** | where the agent works. Depends entirely on where the factory landed |
+
+The first is a build decision, and it is settled by being one static binary per platform -
+**no Node, no Python, no Docker needed to run the factory itself.**
+
+**Only the second is a matrix**, because only the second varies.
+
+Questions and answers locked so far
+
+1. The sandbox ladder
+
+Answer:
+```
+   WSL                    <- Windows' escape hatch
+   Docker / Podman        <- the usual
+   Vercel (cloud)         <- works from ANY computer, needs only network
+   noSandbox              <- genuinely degraded
+```
+
+- **WSL is the missing rung** and it is exactly right - ticket 06 proved Windows mounts are the
+  worst part of developing there, and WSL is near-Linux with fast native containers. The factory
+  should not cope with Windows; it should step into WSL and work.
+- **Vercel underneath everything** means there is no computer that cannot get a real sandbox,
+  unless it has no WSL, no Docker, **and** no network.
+
+**The factory takes the best one it finds.** Nothing more to configure.
+
+2. WSL installation - "the factory can ask the user if they allow installing"
+
+Answer:
+- **Offer to install, ask first. Never unattended.**
+- Honest about the restart: *"this will ask Windows to reboot, and I cannot do that for you."*
+
+Why: the same rule as everywhere in this factory. **It may draft. It never acts on the machine
+without you.**
+
+3. The floor - bare Windows, no WSL, no Docker
+
+The correction: **degraded does not mean less it can do. It means less it is protected.**
+
+| On a bare Windows box | |
+|---|---|
+| Git worktree | yes |
+| Agent runs in it | yes |
+| Browser probes | yes - **Playwright is a native Windows program** |
+| Load probes | yes - k6 ships a Windows build |
+| Sessions, steering, handoff | yes |
+| The merge chain, rule D | yes |
+| **Isolation** | **no** - the agent runs as you, with your keys |
+
+> **Every machine can do everything. What changes is how much damage an agent could do if it went
+> wrong.**
+
+**The container is not what makes the browser work.** It provides a wall. Playwright and k6 both
+have native Windows builds. That is a much better promise than "some platforms can't do things",
+and it is actually true.
+
+The one genuine gap: a test that passes on Windows may fail on Linux, so the factory can promise
+**runnable** results cross-platform, not **reproducible** ones.
+
+4. What it says when it is unprotected
+
+Answer:
+- **It says and carries on.** Reports the risk, runs anyway.
+- **It remembers.** Accepted on this machine, not re-asked every run.
+- **Carve-out: a machine it does not recognise asks.** A fresh VPS, a new build runner, someone
+  else's laptop - your acceptance on your laptop says nothing about that machine.
+
+Why: same rule as ticket 09's blind spots. **It knows your acceptance. It does not know this
+machine's history.**
+
+5. The name - GRAPHEINA
+
+Answer:
+- **The project is GRAPHEINA.** Chosen over the coinage `FABRICYCLUS`.
+
+```
+  fabrica      the forge       makes the thing          <- Latin, from faber, a smith
+  grapheina    the tablet      writes down what it
+                                should do               <- Greek, from graphein, to write
+```
+
+- **factory** is not Latin for a factory. It is the descendant of *fabrica* - which meant a
+  **forge**, the workshop of a craftsman working hard materials. `forge`, `fabric` and `fabricate`
+  are the same root.
+- **graphein** = to write, originally to carve or scratch. Out of it: *graph, program, progress,
+  paragraph, -graphy*, and *programma* - which was a **public notice, posted for anyone to be
+  bound by**. Never hidden.
+- **Factory means assembly line. This is a forge.** Fire, a craftsman, and things brought back to
+  a right shape.
+
+> *Verification note: the root `graphein` and its derivatives were confirmed directly. The
+> standalone headword `grapheina` did not get a clean dictionary hit; it is a standard Greek noun
+> from this root, but the exact gloss was not independently verified.*
+
+Why it is the better name: a coinage is judged by whether you like it. A real word carries its own
+meaning - and **"the art of writing down what should be true" is more accurate than "factory"
+ever was.**
+
+What this ticket produced
+
+- The two-place reframe: the factory runs everywhere as a binary; the *sandbox* is what varies
+- A four-rung ladder, with WSL as the Windows escape hatch and Vercel as the universal fallback
+- **Degraded = less isolation, not less capability**
+- The remember-acceptance rule, with the unfamiliar-machine carve-out
+- The name: **GRAPHEINA**
+
+New questions this raised
+
+None. The name touched binary, config directory, skills and config file, all of which are
+mechanical follow-on work rather than decisions.
+
+No remaining open questions

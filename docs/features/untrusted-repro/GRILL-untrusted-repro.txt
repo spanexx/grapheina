@@ -1,0 +1,108 @@
+Untrusted Repro - Grill Notes
+
+Status: Locked
+Date: 2026-10-13
+Source: wayfinder ticket 15 - "The Repro is executable code built from untrusted output"
+
+What this ticket is about
+
+- The Repro is code an LLM wrote from output an application produced. How does the factory stop
+  that code doing anything other than reproducing a bug?
+- Not: whether the application itself is trustworthy, or what permissions the Builder has.
+
+The threat model, corrected
+
+The ticket opened assuming an attacker hiding instructions in application output. That is real
+but rare: anyone who can write into your application's output is usually a dependency you
+installed, and they already have what they want.
+
+The frequent case is duller - careless rather than evil:
+
+  - a Repro that deletes data, to demonstrate a data-loss bug
+  - a Repro that needs your keys, and the factory hands them over
+  - a Repro that pastes a secret into a file that then gets committed
+
+The correction that made the rest of the ticket answerable:
+
+  The Scout already has a shell inside the sandbox. It already ran commands to find the bug.
+  Running a Repro adds no new capability. What is new is its lifetime - it does not die with the
+  cycle.
+
+So the risk lives almost entirely in what happens after approval, not in execution.
+
+Questions and answers locked so far
+
+1. "no no if i mistakenly approve it, it makes changes to real repo? we might also use agents to
+    review pull requests as optional"
+
+Answer:
+- Approving a bad test does not damage the repository. The file is visible and revertable.
+  What it does is move a script into a place with more power: CI often holds real deploy keys
+  and publish tokens, which the cycle never had.
+- That privilege escalation is accepted. An approved test runs in CI automatically, because
+  a committed-but-never-run test is documentation, not a guard.
+
+Why:
+- Splitting "documentation" from "automated gate" was considered and rejected. A regression you
+  never catch is exactly what CI exists for.
+- Naming this explicitly matters more than the decision: the safe claim is not "the repo is
+  unharmed", it is "the script moves somewhere more powerful".
+
+2. "A" and "optional but offered"
+
+Answer (superseded in part by question 4):
+- The test runs in CI automatically.
+- A pull-request-reviewing agent reviews proposed tests.
+
+Why:
+- See question 4 - "optional but offered" was reversed once it was agreed the human layer
+  could not be relied on alone.
+
+3. "agree with you"
+
+Answer:
+- A Sanitiser runs on every Repro before it is shown for approval.
+- It refuses rather than warns, and says which line and what pattern matched.
+- Strictened into prevention rather than detection (see question 4).
+
+Why:
+- A warning beside a secret gets clicked past. Blocking is the only version that works.
+- The purpose is not to catch clever attacks. It is to catch the accidental one - the key
+  an agent inlined without thinking - which is the case that actually happens.
+
+4. "we need the sanitiser to be stricter and the PR agent to be mandatory, not optional"
+
+Answer:
+- Credentials are forbidden outright, not scanned for. A Repro that needs to sign in must
+  read it from the environment. There is then nothing in the file to leak.
+- The pull-request-reviewing agent is a required stop, not an offer.
+- It may block only by naming a line and a reason. "This looks suspicious" does not block.
+
+Why:
+- The layer order is: sanitiser catches credentials and stray paths; the reviewing agent
+  catches the rest; the human approves. If the human layer is unreliable, the machine layers
+  have to be real gates.
+- Prevention beats detection for credentials. A pattern match can be evaded and produces false
+  confidence. A rule the file cannot violate cannot be evaded at all.
+- The "must name a line" rule is what makes a mandatory agent survivable. A gate that blocks on
+  vague suspicion gets disabled, and a gate that is clicked past is worse than no gate because
+  it manufactures false safety. A specific, checkable reason can be argued with.
+
+What this ticket produced
+
+- A correction to the threat model, and with it the insight that execution was never the risk -
+  lifetime and privilege escalation were.
+- Prevention over detection for the one failure that is both likely and unrecoverable.
+- A hard gate rather than an advisory one, with the discipline to keep it specific.
+
+New questions this raised
+
+None sharp enough to ticket. Two things are worth carrying into ticket 11 (Reviewer rules), which
+already owns gate ordering and default verdicts:
+
+  - a Repro that is refused by the Sanitiser is a Finding about the Scout's own behaviour, and
+    worth counting
+  - a proposed test that the reviewing agent blocks three times in a row is a signal about the
+    Scout, not about the test
+
+No remaining open questions
