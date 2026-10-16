@@ -1,0 +1,4 @@
+    - You must use the `tdd` skill for every implementation.
+    - use `codebase-design` and `improve-codebase-architecture` skills as your mindset. 
+    - Maintain 90% real unit test coverage, all real tests.
+    - Maintain regression/edge cases tests for all module.

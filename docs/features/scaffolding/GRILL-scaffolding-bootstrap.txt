@@ -1,0 +1,78 @@
+Scaffolding (bootstrap) - Grill Addendum
+
+Status: Locked (reconstructed 2026-10-15)
+Source: reverse-engineered from wayfinder tickets 08 / 14 / 21 / 24, the planning handoff, and the
+2026-10-15 build session. Approved by Victor as the reconstructed record.
+Parent: GRILL-scaffolding.txt (ticket 21). The primary decision stands: scaffolding is a
+conversation, not a form, and every decision states how the thing behaves at runtime.
+
+What this addendum is
+
+- Ticket 21 locked HOW scaffolding happens. It did not record the conversation that scaffolded
+  the factory's own first code. That build went straight to code with the process skipped.
+- This addendum reconstructs the missing decision record - the conversation as it should have
+  been written down at the time.
+
+Questions and answers locked
+
+1. What is being scaffolded
+
+Answer:
+- The factory's own first working code: one crate, and the Doctor skeleton as its first binary.
+- Registry first - every later part of the factory plugs into the registry.
+
+Why:
+- Planning is done (24 tickets). Nothing proves the design on a real machine until something
+  runs. The Doctor skeleton is the smallest piece that runs and is useful on day one.
+
+2. The technical side (confirmed first, per ticket 21's order)
+
+Answer:
+- Rust stable, one crate, one binary named `grapheina`, edition 2024, zero dependencies
+  (std only).
+
+Why:
+- Ticket 08: the factory's own logic is not shell scripts; one binary, no dependency tree to
+  audit. Ticket 14 confirms the technical side before behaviour. The handoff says the same:
+  single binary, no dependencies.
+
+3. Where it lives, and the dev lane
+
+Answer:
+- One repo copy at the existing path. Development in WSL Debian. No Windows-native build; cargo
+  stays off the Windows PATH (a stale off-PATH rustup toolchain exists in the user profile but
+  plays no part).
+
+Why:
+- Windows-native Rust needs VS Build Tools (multi-GB) - rejected. WSL is the first rung of the
+  sandbox ladder (ticket 14). Windows keeping cargo off PATH keeps ticket 24's day-one Finding
+  real: a binary run on this host honestly finds missing cargo.
+  Approved by Victor, 2026-10-15.
+
+4. First runtime behaviour
+
+Answer:
+- `grapheina doctor` - the contract lives in ticket 24: sections System then Code, tick / warn /
+  cross marks, fixes printed with their blast radius ("outside the project, always asks first").
+  Exit codes: 0 fine | 2 broken | 4 broken-and-accepted | 6 gave up. Never 1.
+- Usage errors exit 64, outside the Doctor's contract on purpose.
+- This build demonstrates 0, 2 and 64 live. Codes 4 and 6 exist in the model only (no acceptance
+  store, no live gave-up path yet) - deferred, listed in the PRD-TRD Non-Goals.
+
+Why:
+- The machine was honestly unprepared (no Rust anywhere). The day-one Finding from ticket 24 is
+  exactly the case this machine can produce - the first demo is real, not staged.
+
+5. Conventions locked with the build
+
+Answer:
+- No comments unless asked (repo ethics). One job per small module. `cargo fmt --check` and
+  `clippy` clean. Tests via `cargo test` in WSL; the not-installed cases are hermetic through
+  the probe seam (pinned PATH), and one CLI smoke test deliberately runs on the real host.
+
+Reconstruction note
+
+This addendum was written after the code existed. It records the decisions that were in fact
+taken during the 2026-10-15 session, in the form ticket 21 requires. No decision was invented;
+where the session decided something (dev lane, zero deps, exit 64 for usage), that decision is
+recorded verbatim. Where ticket 24 already locked behaviour, it is cited rather than repeated.

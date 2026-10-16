@@ -1,0 +1,60 @@
+# GRAPHEINA — first code green + the skipped process reconstructed (nothing committed)
+
+**Date:** 2026-10-16
+**Repo:** `C:\Users\shuga\Desktop\shared\factory\GRAPHEINA` (WSL: `/mnt/c/Users/shuga/Desktop/shared/factory/GRAPHEINA`)
+**State:** Doctor skeleton built and green (16 tests). The pipeline that was skipped for the
+scaffolding is now reconstructed, drift-checked, and reconciled. **Nothing committed yet — awaiting
+Victor's explicit go.**
+**Last commit:** `c1c7082 docs: close the wayfinder map - 23 of 24 tickets decided` (all code and docs below are uncommitted)
+
+Full build write-up: `sessions/2026-10-15-doctor-skeleton.md` (§8 = the 2026-10-16 reconstruction).
+Drift review: `.reports/2026-10-16-drift-scaffolding.md` — verdict Minor Drift; all 4 wording gaps fixed, no code changed.
+
+---
+
+## Dev lane — WSL Debian (never build on Windows)
+
+Windows keeps cargo off PATH on purpose (VS Build Tools rejected; keeps the Doctor's day-one finding real — a stale off-PATH rustup toolchain exists in the user profile but plays no part). All development is in WSL Debian; the repo stays in exactly one place.
+
+    # build + test
+    wsl -d Debian -- bash -lc 'cd /mnt/c/Users/shuga/Desktop/shared/factory/GRAPHEINA && cargo test'
+
+    # run the Doctor
+    wsl -d Debian -- bash -lc 'cd /mnt/c/Users/shuga/Desktop/shared/factory/GRAPHEINA && ./target/debug/grapheina doctor'
+
+    # the canonical simulation (23 checks, runs the real binary)
+    wsl -d Debian -- bash -lc 'cd /mnt/c/Users/shuga/Desktop/shared/factory/GRAPHEINA && bash docs/features/scaffolding/simulate.sh'
+
+    # the honest day-one finding (git visible, cargo hidden) -> ✗ cargo, exit 2
+    wsl -d Debian -- bash -lc 'cd /mnt/c/Users/shuga/Desktop/shared/factory/GRAPHEINA && env PATH=/usr/bin:/bin ./target/debug/grapheina doctor && echo FINE || echo BROKEN'
+
+Quirks: through `wsl.exe` from PowerShell, `$?` is mangled — read exit codes with `&& echo OK || echo BAD`. POSIX default-path fallback: PATH unset still finds `/usr/bin/git`; hermetic tests use `PATH=/nonexistent`.
+
+## What exists
+
+- **Code:** `src/lib.rs` + `src/main.rs` + `src/doctor/{types,check,checks,environment,registry,report,render}.rs`; tests `tests/doctor_survey.rs` (9) + `tests/cli.rs` (4). Contract: exit codes 0|2|4|6 (never 1), usage 64; Doctor recommends, never acts.
+- **Process pack (reconstructed 2026-10-16):** `docs/features/scaffolding/` — `GRILL-scaffolding.txt` (ticket 21, untouched), `GRILL-scaffolding-bootstrap.txt`, `PRD-TRD-scaffolding.md` (scenarios S0–S5), `IMPL-scaffolding.md` (P1–P6 done, P7–P10 pending), canonical `simulate.sh`, archived design mirror `archive/simulate-pre.sh`.
+- **`docs/features/doctor/` is deliberately kept EMPTY** — reserved for the full Doctor, to be built through the feature-pipeline (grill → sims → PRD-TRD → IMPL) when its turn comes. Do not use it for anything else.
+
+## Next steps, in order
+
+1. **Commit everything** (Victor's explicit go needed). Files: `Cargo.toml`, `Cargo.lock`, `src/`, `tests/`, `.gitignore`, `sessions/`, `docs/features/scaffolding/`, `.reports/`.
+   Prove: `git -C GRAPHEINA log --oneline -1` shows a new commit.
+2. **`--json` rendering** — ticket 24 Q5: same `Report`, second renderer, hand-rolled (no dependencies).
+   Prove: `cargo test` (new golden render test) + a live `./target/debug/grapheina doctor --json` run.
+3. **Sandcastle is not a git repo.** `factory/sandcastle` has no `.git` (arrived as a copy). Victor's decision: `git init` there, or clone from `mattpocock/sandcastle`. Handoff step 4 (first real Cycle target) depends on it.
+4. First real Cycle prep (Scout/Harness) — designed in tickets 09/16.
+
+**User-only follow-ups (do NOT do without Victor):** installing anything on Windows/WSL, `git init` in sandcastle, spending money (ticket 05), running the commit.
+
+## Do NOT
+
+- Do not commit without Victor's explicit go.
+- Do not re-open settled tickets; code-vs-doc gaps go to the drift log, not a re-grill.
+- Do not add scripts or bash to the binary's contract (ticket 08).
+- Do not make the Doctor act or install anything (ticket 24 — it recommends).
+- Do not write into `docs/features/doctor/` without going through the feature-pipeline.
+
+## Skills for the next session
+
+`situation-awareness` (reads this) · `surgical-change` for small fixes · `drift` if code contradicts a ticket · `feature-pipeline` when the full Doctor or `--json` gets built as a pack · `tdd` for every implementation · `domain-modeling` if terms drift from `CONTEXT.md`.
