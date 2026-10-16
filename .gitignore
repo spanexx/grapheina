@@ -1,2 +1,2 @@
-/target
-.reports/
+__pycache__/
+*.pyc
