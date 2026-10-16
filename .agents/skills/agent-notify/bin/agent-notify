@@ -1,0 +1,648 @@
+#!/usr/bin/env python3
+"""agent-notify: local event hub for agents (system-wide).
+
+Events are markdown notes with an id, an append-only JSONL announcement
+stream, an event-side guestbook, and per-target outbox delivery to each
+agent's CLI mouth. No daemon, no cron: subscribers sweep themselves.
+
+Contract (GRILL-agent-notify.txt, wayfinder map):
+  create <id> --title T [--ask A] start event, subscribes and notifies Victor
+  update <id> "new line"        append to note, announce, deliver delta
+  done <id> --outcome S [--result P]  finish event (success|fail|waiting)
+  reply <id> "text"             Victor/agent message on the event
+  sub <id> / unsub <id>         event guestbook (with --as <name>)
+  show <id>                     full note
+  ls [--mine]                   live events + your subs
+  watch <id>                    tail the event's updates live
+  sweep                         delete events idle >24h (subscriber-driven)
+  drain [--target NAME]         deliver queued outbox pokes (retry<=3)
+  dismiss <id>                  clear pending-victor entry
+
+Data layout:
+  ~/.agent-notify/events.jsonl              announcement stream
+  ~/.agent-notify/events/<id>.md            the note (append-only body)
+  ~/.agent-notify/events/<id>.guest.json    subscriber guestbook
+  ~/.agent-notify/outbox/<target>.jsonl     pending deliveries
+  ~/.agent-notify/subscribers/<name>.json   registry (name + filters)
+  ~/.agent-notify/pending-victor.md         unanswered human pokes
+"""
+import argparse
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+import uuid
+from datetime import datetime, timezone
+from pathlib import Path
+
+BASE = Path(os.environ.get("AGENT_NOTIFY_BASE", str(Path.home() / ".agent-notify")))
+EVENTS_DIR = BASE / "events"
+OUTBOX_DIR = BASE / "outbox"
+SUBS_DIR = BASE / "subscribers"
+PENDING_DIR = BASE / "pending-subs"
+EVENTS_LOG = BASE / "events.jsonl"
+PENDING = BASE / "pending-victor.md"
+TTL = 24 * 3600
+MAX_RETRIES = 3
+VICTOR = "victor"
+
+DEFAULT_AGENT = os.environ.get("AGENT_NOTIFY_AGENT", "hermes")
+DEFAULT_MODEL = os.environ.get("CLINE_DEFAULT_MODEL", "deepseek/deepseek-v4-flash")
+TELEGRAM_TARGET = os.environ.get("AGENT_NOTIFY_TELEGRAM_TARGET", "telegram:-1004395148692")
+
+# Voice delivery pipeline binaries (resolved at process start; tests override PATH before launch).
+_SPEECHSPARK_BIN: str | None = shutil.which("speechspark")
+_FFMPEG_BIN: str | None = shutil.which("ffmpeg")
+
+
+def now():  return int(time.time())
+
+
+def stamp():  return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def ensure_dirs():
+    for d in (EVENTS_DIR, OUTBOX_DIR, SUBS_DIR):
+        d.mkdir(parents=True, exist_ok=True)
+    (BASE / ".gitignore").write_text("*\n") if not (BASE / ".gitignore").exists() else None
+    ensure_victor_subscriptions()
+
+
+def announce(ev: dict, note_offset: int = 0, delta_count: int = 0):
+    line = {
+        "id": uuid.uuid4().hex[:12], "type": ev["type"], "time": now(),
+        "publisher": ev.get("publisher", DEFAULT_AGENT),
+        "data": {
+            "jobId": ev["event"], "title": ev.get("title"),
+            "outcome": ev.get("outcome"), "result": ev.get("result"),
+            "noteOffset": note_offset, "deltaCount": delta_count,
+            "notePath": str(EVENTS_DIR / f"{ev['event']}.md"),
+        },
+    }
+    with open(EVENTS_LOG, "a", encoding="utf-8") as f:
+        f.write(json.dumps(line) + "\n")
+    return line
+
+
+def note_lines(evt_id: str) -> int:
+    p = EVENTS_DIR / f"{evt_id}.md"
+    if not p.exists():  return 0
+    return sum(1 for _ in p.open(encoding="utf-8"))
+
+
+def append_note(evt_id: str, text: str):
+    p = EVENTS_DIR / f"{evt_id}.md"
+    offset = p.stat().st_size if p.exists() else 0
+    with open(p, "a", encoding="utf-8") as f:
+        f.write(text if text.endswith("\n") else text + "\n")
+    return offset
+
+
+def guestbook(evt_id: str) -> list:
+    p = EVENTS_DIR / f"{evt_id}.guest.json"
+    if not p.exists():  return []
+    return json.loads(p.read_text(encoding="utf-8"))
+
+
+def write_guestbook(evt_id: str, subs: list):
+    p = EVENTS_DIR / f"{evt_id}.guest.json"
+    tmp = p.with_suffix(".tmp")
+    tmp.write_text(json.dumps(subs, indent=2), encoding="utf-8")
+    tmp.replace(p)
+
+
+def ensure_victor_subscriptions():
+    """Keep Victor present on every live event without replaying old pokes."""
+    for note in EVENTS_DIR.glob("*.md"):
+        evt_id = note.stem
+        subs = guestbook(evt_id)
+        if VICTOR not in subs:
+            write_guestbook(evt_id, [*subs, VICTOR])
+
+
+def subscriber_name(args) -> str:
+    return getattr(args, "as_", None) or DEFAULT_AGENT
+
+
+def poke_context(evt_id: str, header: dict, delta: list[str], ask: str = "") -> str:
+    note_path = EVENTS_DIR / f"{evt_id}.md"
+    lines = [
+        f"agent-notify: event {evt_id} ({header.get('title', 'untitled')})",
+        f"publisher: {header.get('publisher', '?')}  time: {header.get('time', '?')}",
+    ]
+    if ask:  lines.append(f"ask: {ask}")
+    lines.append(f"new lines ({len(delta)}):")
+    lines.extend(f"  {d}" for d in delta)
+    lines.append(f"full note: {note_path} (read it for the whole story)")
+    return "\n".join(lines)
+
+
+def webhook_deliver(ctx: str) -> tuple[bool, str]:
+    """Deliver to hermes via the gateway's webhook platform (step 4).
+
+    The gateway's webhook listener IS the watcher: it dies with the gateway,
+    and session-start drain catches any gap. Poke context goes in the
+    payload; the subscription spawns an actionable agent turn.
+    """
+    cfg = BASE / "webhook.json"
+    if not cfg.exists():
+        return False, "webhook.json missing (step 4 setup not run)"
+    try:
+        conf = json.loads(cfg.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        return False, f"webhook.json corrupt: {e}"
+    url = conf.get("url")
+    secret = conf.get("secret", "")
+    if not url:
+        return False, "webhook.json has no url"
+    import hashlib
+    import hmac
+    import urllib.request
+    body = json.dumps({"event": "agent-notify", "context": ctx}).encode()
+    sig = hmac.new(secret.encode(), body, hashlib.sha256).hexdigest()
+    req = urllib.request.Request(
+        url, data=body,
+        headers={"Content-Type": "application/json",
+                 "X-Hub-Signature-256": f"sha256={sig}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.status == 200, f"http {resp.status}"
+    except Exception as e:
+        return False, f"webhook post failed: {e}"
+
+
+MOUTHS = {
+    # name -> builder(context) -> argv list
+    "hermes":   lambda ctx: ["hermes", "chat", "-q", ctx],
+    "cline":    lambda ctx: ["cline-one", "--timeout", "600", ctx],
+    "opencode": lambda ctx: ["opencode", "run", ctx],
+    "victor":   lambda ctx: ["hermes", "send", "-t", TELEGRAM_TARGET, ctx],
+    "dsh":      lambda ctx: ["dsh", "--profile", "web", ctx],
+}
+
+
+def spoken_event_id(evt_id: str) -> str:
+    """Convert an event id into a voice-friendly spoken form.
+    'release-review-20260825' → 'release review 20260825'.
+    """
+    return re.sub(r"[-_]+", " ", evt_id).strip()
+
+
+def voice_summary(evt_id: str, meta: dict) -> str:
+    """Build a short plain-English sentence for spoken delivery to Victor.
+
+    Includes the event id (spoken without hyphens), the title, the publisher,
+    a voice-friendly 'just now' instead of a raw ISO timestamp, and the ask.
+    Never exposes file paths or raw event ids verbatim.
+    """
+    spoken_id = spoken_event_id(evt_id)
+    title = meta.get("title") or evt_id
+    publisher = meta.get("publisher") or "an agent"
+    ask = meta.get("ask") or ""
+    parts = [
+        f"New event: {spoken_id}.",
+        f"{title}.",
+        f"From {publisher}, just now.",
+    ]
+    if ask:
+        parts.append(ask)
+    return " ".join(parts)
+
+
+def deliver_victor_voice(evt_id: str, meta: dict) -> tuple[bool, str]:
+    """Synthesize a spoken summary and deliver it as a Telegram voice bubble.
+
+    Requires speechspark (for synthesis) and ffmpeg (for WAV→Opus conversion).
+    Both are best-effort: if either binary is absent or fails, returns
+    (False, reason) so the caller can log and continue — text delivery is
+    always attempted independently and is not affected by this failure.
+    """
+    if not _SPEECHSPARK_BIN:
+        return False, "speechspark not found on PATH; voice delivery skipped"
+    if not _FFMPEG_BIN:
+        return False, "ffmpeg not found on PATH; voice delivery skipped"
+    text = voice_summary(evt_id, meta)
+    wav_fd, wav_path = tempfile.mkstemp(prefix="agent-notify-voice-", suffix=".wav")
+    os.close(wav_fd)
+    ogg_path = wav_path[:-4] + ".ogg"
+    try:
+        r = subprocess.run(
+            [_SPEECHSPARK_BIN, "say", text, "-o", wav_path],
+            capture_output=True, text=True, timeout=60,
+        )
+        if r.returncode != 0 or not os.path.exists(wav_path) or os.path.getsize(wav_path) == 0:
+            return False, f"speechspark say failed: {(r.stderr or r.stdout).strip()[:200]}"
+        r = subprocess.run(
+            [_FFMPEG_BIN, "-y", "-i", wav_path, "-c:a", "libopus",
+             "-b:a", "32k", "-ar", "48000", ogg_path],
+            capture_output=True, text=True, timeout=60,
+        )
+        if r.returncode != 0 or not os.path.exists(ogg_path):
+            return False, f"ffmpeg conversion failed: {(r.stderr or '').strip()[-200:]}"
+        r = subprocess.run(
+            ["hermes", "send", "--to", TELEGRAM_TARGET,
+             f"[[audio_as_voice]] MEDIA:{ogg_path}"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if r.returncode != 0:
+            return False, f"hermes send (voice) failed: {(r.stderr or r.stdout).strip()[:200]}"
+        return True, ""
+    except subprocess.TimeoutExpired:
+        return False, "voice pipeline timed out"
+    finally:
+        for p in (wav_path, ogg_path):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
+def queue_delivery(evt_id: str, subs: list, ctx: str, voice_meta: dict | None = None):
+    """Enqueue one poke per subscriber AND attempt immediate delivery.
+
+    The outbox line is written FIRST (durability: a crash mid-delivery is
+    retried by the next drain), then each target is delivered on the spot.
+    Success removes the line; failure leaves it for the next drain, with
+    the retry counter handling repeated failures. dsh@* session inboxes
+    are skipped here — the dsh plugin delivers those live (5s poll).
+    """
+    for name in subs:
+        out = OUTBOX_DIR / f"{name}.jsonl"
+        entry = {"event": evt_id, "target": name, "context": ctx,
+                 "retries": 0, "queuedAt": now()}
+        with open(out, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+        if name.startswith("dsh"):
+            print(f"[agent-notify] queued for dsh session {name} (plugin delivers live)")
+            continue
+        ok, err = deliver(name, ctx)
+        if ok:
+            # immediate handoff succeeded — remove the queued line
+            lines = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines() if l.strip()]
+            lines = [l for l in lines if not (l["target"] == name and l["event"] == evt_id and l["queuedAt"] == entry["queuedAt"])]
+            out.write_text("".join(json.dumps(l) + "\n" for l in lines), encoding="utf-8")
+            print(f"[agent-notify] delivered to {name}: event {evt_id}")
+        else:
+            entry["retries"] += 1
+            with open(out, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+            print(f"[agent-notify] queued for retry ({name}): {err}")
+        # Victor always gets a voice message in addition to the text poke.
+        # This is enforced here — agents never need to remember it.
+        if name == VICTOR and voice_meta is not None:
+            vok, verr = deliver_victor_voice(evt_id, voice_meta)
+            if vok:
+                print(f"[agent-notify] delivered voice to victor: event {evt_id}")
+            else:
+                print(f"[agent-notify] voice delivery skipped for victor: {verr}")
+
+
+def deliver(target: str, ctx: str) -> tuple[bool, str]:
+    # dsh@<session> targets are drained BY the dsh plugin itself (it reads
+    # its inbox, injects into the session via followup, removes the line).
+    # No CLI mouth exists; the CLI must never retry/drop these.
+    if target.startswith("dsh"):
+        return False, f"target '{target}' is plugin-drained (dsh session inbox); not a CLI mouth"
+    # hermes delivery prefers the gateway webhook (step 4): the gateway's
+    # listener IS the watcher — dies with it, session-start catches the gap.
+    if target == "hermes" and (BASE / "webhook.json").exists():
+        ok, err = webhook_deliver(ctx)
+        if ok:
+            return True, ""
+        # fall through to hermes chat -q on webhook failure
+    builder = MOUTHS.get(target)
+    if not builder:
+        return False, f"no mouth for target '{target}'"
+    try:
+        r = subprocess.run(builder(ctx), capture_output=True, text=True, timeout=600)
+        if r.returncode == 0:
+            return True, ""
+        return False, (r.stderr or r.stdout or "non-zero exit").strip()[:200]
+    except FileNotFoundError as e:
+        return False, f"mouth binary missing: {e}"
+    except subprocess.TimeoutExpired:
+        return False, "mouth timed out"
+
+
+def drain(target: str | None = None, dry_run: bool = False):
+    targets = [target] if target else [p.stem for p in OUTBOX_DIR.glob("*.jsonl")]
+    # dsh@<session> inboxes belong to the dsh plugin — it drains its own
+    # files (read + inject + remove). The CLI must not touch them.
+    targets = [t for t in targets if not t.startswith("dsh")]
+    if target and target.startswith("dsh"):
+        print(f"[agent-notify] '{target}' is a dsh session inbox — the dsh plugin drains it, not the CLI",
+              file=sys.stderr)
+        return []
+    failed: list[tuple[str, str]] = []
+    for t in targets:
+        out = OUTBOX_DIR / f"{t}.jsonl"
+        if not out.exists():  continue
+        pending = [json.loads(l) for l in out.read_text(encoding="utf-8").splitlines() if l.strip()]
+        if dry_run:
+            for entry in pending:
+                print(f"[agent-notify] DRY-RUN would deliver to {t}: event "
+                      f"{entry['event']}\n--- poke ---\n{entry['context']}\n---")
+            continue
+        kept = []
+        for entry in pending:
+            ok, err = deliver(t, entry["context"])
+            if ok:
+                print(f"[agent-notify] delivered to {t}: event {entry['event']}")
+                continue
+            entry["retries"] += 1
+            if entry["retries"] < MAX_RETRIES:
+                kept.append(entry)
+                print(f"[agent-notify] retry {entry['retries']}/{MAX_RETRIES} -> {t}: {err}")
+            else:
+                failed.append((entry["event"], t, err))
+                announce({"type": "delivery/failed", "event": entry["event"],
+                          "publisher": "agent-notify", "title": "delivery failed"})
+                print(f"[agent-notify] DROPPED after {MAX_RETRIES} retries -> {t}: {err}")
+        out.write_text("".join(json.dumps(e) + "\n" for e in kept), encoding="utf-8")
+    return failed
+
+
+def sweep():
+    removed = []
+    for p in EVENTS_DIR.glob("*.md"):
+        age = now() - int(p.stat().st_mtime)
+        if age > TTL:
+            evt = p.stem
+            announce({"type": "event/expired", "event": evt, "publisher": "agent-notify",
+                      "title": "expired (idle 24h)"})
+            p.unlink(missing_ok=True)
+            (EVENTS_DIR / f"{evt}.guest.json").unlink(missing_ok=True)
+            removed.append(evt)
+    return removed
+
+
+def pend_victor(evt_id: str, ask: str):
+    PENDING.parent.mkdir(exist_ok=True)
+    with open(PENDING, "a", encoding="utf-8") as f:
+        f.write(f"| {evt_id} | {ask} | {stamp()} |\n")
+
+
+def dismiss(evt_id: str):
+    if not PENDING.exists():  return False
+    lines = [l for l in PENDING.read_text(encoding="utf-8").splitlines()
+             if not l.startswith(f"| {evt_id} |")]
+    PENDING.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    return True
+
+
+def cmd_create(args):
+    ensure_dirs()
+    note = EVENTS_DIR / f"{args.event_id}.md"
+    if note.exists():
+        print(f"error: event '{args.event_id}' already exists", file=sys.stderr)
+        return 1
+    created_by = subscriber_name(args)
+    creation_lines = [f"# {args.title}", f"_created by {created_by} at {stamp()}_"]
+    append_note(args.event_id, "\n".join(creation_lines) + "\n")
+    guest = [created_by]
+    if VICTOR not in guest:
+        guest.append(VICTOR)
+    # Fold in any pending subscriptions made before the event existed.
+    ps = PENDING_DIR / f"{args.event_id}.jsonl"
+    if ps.exists():
+        for l in ps.read_text(encoding="utf-8").splitlines():
+            if not l.strip():
+                continue
+            try:
+                pend = json.loads(l)
+            except json.JSONDecodeError:
+                continue
+            if pend.get("name") not in guest:
+                guest.append(pend["name"])
+        ps.unlink()
+    write_guestbook(args.event_id, guest)
+    announce({"type": "job/start", "event": args.event_id, "title": args.title,
+              "publisher": created_by})
+    _ask = args.ask or "new event created"
+    ctx = poke_context(args.event_id,
+                       {"title": args.title, "publisher": created_by, "time": stamp()},
+                       creation_lines, ask=_ask)
+    queue_delivery(args.event_id, [VICTOR], ctx,
+                   voice_meta={"title": args.title, "publisher": created_by, "ask": _ask})
+    print(f"[agent-notify] event {args.event_id} created ({note}); Victor subscribed and notified")
+    return 0
+
+
+def cmd_update(args):
+    ensure_dirs()
+    evt = args.event_id
+    if not (EVENTS_DIR / f"{evt}.md").exists():
+        print(f"error: no such event '{evt}' (ls to see live events)", file=sys.stderr)
+        return 1
+    before = note_lines(evt)
+    append_note(evt, f"- [{stamp()}] {subscriber_name(args)}: {args.line}")
+    announce({"type": "job/progress", "event": evt, "publisher": subscriber_name(args)},
+             delta_count=note_lines(evt) - before)
+    subs = [s for s in guestbook(evt) if s != subscriber_name(args)]
+    _title = (EVENTS_DIR / f"{evt}.md").read_text(encoding='utf-8').splitlines()[0].lstrip('# ').strip() if (EVENTS_DIR / f"{evt}.md").exists() else evt
+    ctx = poke_context(evt, {"title": _title, "publisher": subscriber_name(args), "time": stamp()},
+                        [args.line])
+    queue_delivery(evt, subs, ctx,
+                   voice_meta={"title": _title, "publisher": subscriber_name(args), "ask": args.line})
+    print(f"[agent-notify] event {evt} updated")
+    return 0
+
+
+def cmd_done(args):
+    ensure_dirs()
+    evt = args.event_id
+    if not (EVENTS_DIR / f"{evt}.md").exists():
+        print(f"error: no such event '{evt}'", file=sys.stderr)
+        return 1
+    line = f"- [{stamp()}] {subscriber_name(args)}: DONE ({args.outcome})"
+    if args.result:  line += f" — result: {args.result}"
+    append_note(evt, line)
+    announce({"type": "job/done", "event": evt, "outcome": args.outcome,
+              "result": args.result, "publisher": subscriber_name(args)})
+    subs = [s for s in guestbook(evt) if s != subscriber_name(args)]
+    ask = f"job finished ({args.outcome})" + (f"; result at {args.result}" if args.result else "")
+    ctx = poke_context(evt, {"title": evt, "publisher": subscriber_name(args), "time": stamp()},
+                       [line], ask=ask)
+    queue_delivery(evt, subs, ctx,
+                   voice_meta={"title": evt, "publisher": subscriber_name(args), "ask": ask})
+    if not subs:
+        pend_victor(evt, ask) if subscriber_name(args) != "victor" else None
+    print(f"[agent-notify] event {evt} done ({args.outcome})")
+    return 0
+
+
+def cmd_reply(args):
+    ensure_dirs()
+    evt = args.event_id
+    if not (EVENTS_DIR / f"{evt}.md").exists():
+        print(f"error: no such event '{evt}'", file=sys.stderr)
+        return 1
+    line = f"- [{stamp()}] MESSAGE {subscriber_name(args)}: {args.text}"
+    append_note(evt, line)
+    announce({"type": "message", "event": evt, "publisher": subscriber_name(args),
+              "data": {"target": "*"}})
+    subs = [s for s in guestbook(evt) if s != subscriber_name(args)]
+    ctx = poke_context(evt, {"title": evt, "publisher": subscriber_name(args), "time": stamp()},
+                       [f"MESSAGE {subscriber_name(args)}: {args.text}"], ask="reply to this message")
+    queue_delivery(evt, subs, ctx,
+                   voice_meta={"title": evt, "publisher": subscriber_name(args), "ask": args.text})
+    dismiss(evt)
+    print(f"[agent-notify] message posted on event {evt}")
+    return 0
+
+
+def cmd_sub(args):
+    ensure_dirs()
+    evt = args.event_id
+    name = subscriber_name(args)
+    if not (EVENTS_DIR / f"{evt}.md").exists():
+        # Pending subscription: hold it; folds into the guestbook at create.
+        ps = PENDING_DIR / f"{evt}.jsonl"
+        ps.parent.mkdir(parents=True, exist_ok=True)
+        existing = [json.loads(l)["name"] for l in
+                    ps.read_text(encoding="utf-8").splitlines() if l.strip()] if ps.exists() else []
+        if name not in existing:
+            with open(ps, "a", encoding="utf-8") as f:
+                f.write(json.dumps({"name": name, "time": now()}) + "\n")
+        print(f"[agent-notify] pending sub: {name} -> {evt} (event not created yet; "
+              f"will subscribe automatically when it appears)")
+        return 0
+    subs = guestbook(evt)
+    if name not in subs:
+        subs.append(name)
+        write_guestbook(evt, subs)
+    print(f"[agent-notify] {name} subscribed to {evt} (guestbook: {subs})")
+    return 0
+
+
+def cmd_unsub(args):
+    evt = args.event_id
+    name = subscriber_name(args)
+    if name == VICTOR:
+        print("error: Victor is a mandatory subscriber and cannot be unsubscribed", file=sys.stderr)
+        return 2
+    # Remove from guestbook if event exists.
+    if (EVENTS_DIR / f"{evt}.md").exists():
+        subs = [s for s in guestbook(evt) if s != name]
+        write_guestbook(evt, subs)
+    # Remove from pending subs if event not created yet.
+    ps = PENDING_DIR / f"{evt}.jsonl"
+    if ps.exists():
+        lines = [json.loads(l) for l in ps.read_text(encoding="utf-8").splitlines() if l.strip()]
+        lines = [l for l in lines if l["name"] != name]
+        if lines:
+            ps.write_text("".join(json.dumps(l) + "\n" for l in lines), encoding="utf-8")
+        else:
+            ps.unlink()
+        print(f"[agent-notify] {name} unsubscribed (pending) from {evt}")
+        return 0
+    if not (EVENTS_DIR / f"{evt}.md").exists():
+        print(f"[agent-notify] {name} was not subscribed to {evt}")
+        return 0
+    print(f"[agent-notify] {name} unsubscribed from {evt}")
+    return 0
+
+
+def cmd_show(args):
+    p = EVENTS_DIR / f"{args.event_id}.md"
+    if not p.exists():
+        print(f"error: no such event '{args.event_id}'", file=sys.stderr)
+        return 1
+    print(p.read_text(encoding="utf-8"))
+    return 0
+
+
+def cmd_ls(args):
+    ensure_dirs()
+    events = []
+    for p in EVENTS_DIR.glob("*.md"):
+        subs = guestbook(p.stem)
+        line = p.read_text(encoding="utf-8").splitlines()
+        title = line[0].lstrip("# ").strip() if line else p.stem
+        mine = "  [subscribed]" if (args.mine and subscriber_name(args) in subs) else ""
+        if args.mine and subscriber_name(args) not in subs:
+            continue
+        events.append(f"{p.stem}  —  {title}  ({len(subs)} subs){mine}")
+    print("\n".join(sorted(events)) if events else "(no live events)")
+    return 0
+
+
+def cmd_watch(args):
+    evt = args.event_id
+    if not (EVENTS_DIR / f"{evt}.md").exists():
+        print(f"error: no such event '{evt}'", file=sys.stderr)
+        return 1
+    offset = note_lines(evt)
+    print(f"[agent-notify] watching {evt} (starting at line {offset + 1})")
+    while True:
+        lines = note_lines(evt)
+        if lines > offset:
+            p = EVENTS_DIR / f"{evt}.md"
+            for i, l in enumerate(p.read_text(encoding="utf-8").splitlines(), 1):
+                if i > offset:  print(l)
+            offset = lines
+        time.sleep(2)
+
+
+def cmd_sweep(args):
+    removed = sweep()
+    if removed:
+        print(f"[agent-notify] swept {len(removed)} expired events: {', '.join(removed)}")
+    else:
+        print("[agent-notify] nothing to sweep")
+    return 0
+
+
+def cmd_drain(args):
+    failed = drain(getattr(args, "target", None), dry_run=getattr(args, "dry_run", False))
+    if getattr(args, "dry_run", False):
+        return 0
+    if not failed:
+        print("[agent-notify] outbox drained")
+    else:
+        for evt, t, _ in failed:
+            print(f"[agent-notify] dropped {evt} -> {t} (see delivery/failed in log)")
+    return 0
+
+
+def cmd_dismiss(args):
+    if dismiss(args.event_id):
+        print(f"[agent-notify] dismissed pending {args.event_id}")
+    else:
+        print(f"[agent-notify] nothing pending for {args.event_id}")
+    return 0
+
+
+def main():
+    p = argparse.ArgumentParser(prog="agent-notify", description="local event hub for agents")
+    p.add_argument("--as", dest="as_", default=None, help="act as this subscriber (default: hermes)")
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--as", dest="as_", default=argparse.SUPPRESS,
+                        help="act as this subscriber (default: hermes)")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    c = sub.add_parser("create", parents=[common]); c.add_argument("event_id"); c.add_argument("--title", required=True); c.add_argument("--ask", help="decision or action requested from subscribers"); c.set_defaults(fn=cmd_create)
+    c = sub.add_parser("update", parents=[common]); c.add_argument("event_id"); c.add_argument("line"); c.set_defaults(fn=cmd_update)
+    c = sub.add_parser("done", parents=[common]); c.add_argument("event_id"); c.add_argument("--outcome", required=True, choices=["success", "fail", "waiting"]); c.add_argument("--result"); c.set_defaults(fn=cmd_done)
+    c = sub.add_parser("reply", parents=[common]); c.add_argument("event_id"); c.add_argument("text"); c.set_defaults(fn=cmd_reply)
+    c = sub.add_parser("sub", parents=[common]); c.add_argument("event_id"); c.set_defaults(fn=cmd_sub)
+    c = sub.add_parser("unsub", parents=[common]); c.add_argument("event_id"); c.set_defaults(fn=cmd_unsub)
+    c = sub.add_parser("show", parents=[common]); c.add_argument("event_id"); c.set_defaults(fn=cmd_show)
+    c = sub.add_parser("ls", parents=[common]); c.add_argument("--mine", action="store_true"); c.set_defaults(fn=cmd_ls)
+    c = sub.add_parser("watch", parents=[common]); c.add_argument("event_id"); c.set_defaults(fn=cmd_watch)
+    c = sub.add_parser("sweep", parents=[common]); c.set_defaults(fn=cmd_sweep)
+    c = sub.add_parser("drain", parents=[common]); c.add_argument("--target", default=None); c.add_argument("--dry-run", dest="dry_run", action="store_true", help="show pokes without delivering"); c.set_defaults(fn=cmd_drain)
+    c = sub.add_parser("dismiss", parents=[common]); c.add_argument("event_id"); c.set_defaults(fn=cmd_dismiss)
+
+    args = p.parse_args()
+    return args.fn(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

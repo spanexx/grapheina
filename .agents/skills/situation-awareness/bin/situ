@@ -1,0 +1,300 @@
+#!/bin/bash
+# situ — global repo-aware situation CLI (replaces repo-tied main.sh)
+# Repo-aware: detects the current git repo, the workspace it lives in, and
+# every repo's handoff. Works from ANY codebase — no repo-specific paths.
+#
+# Usage:
+#   situ                     in a repo → project report; in a workspace root
+#                            with 2+ repos → workspace overview
+#   situ handoffs            list every repo under the workspace + latest handoff
+#   situ handoff [repo]      full handoff of the current or named repo
+#   situ status [repo]       git report of the current or named repo
+#   situ --version | help
+#
+# Install: ln -s "$(pwd)/situ" ~/.local/bin/situ  (or copy + chmod +x)
+set -u
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# --- workspace detection ---------------------------------------------------
+# Current repo: git root of cwd (or explicit arg). Workspace: walk up until
+# the parent is no longer inside a git repo; fall back to cwd.
+find_repo() {
+    if [ -n "${1:-}" ]; then
+        git -C "$1" rev-parse --show-toplevel 2>/dev/null || echo "$1"
+    else
+        git rev-parse --show-toplevel 2>/dev/null || echo ""
+    fi
+}
+
+find_workspace() {
+    local start="${1:-$PWD}"
+    local cur
+    cur="$(cd "$start" && pwd)"
+    # Walk up from the start: the workspace is the topmost directory that is
+    # NOT inside a git repo but whose children (or itself) contain git repos.
+    # From inside a repo, we stop at the first non-repo ancestor.
+    while [ "$cur" != "/" ]; do
+        if git -C "$cur" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+            # $cur is (inside) a repo — workspace is above it; keep walking.
+            cur="$(dirname "$cur")"
+            continue
+        fi
+        # $cur is not a repo. If it contains a .git (it IS a repo root via a
+        # bare/odd layout) or any child repo, it's the workspace. Simplest:
+        # a non-repo dir that has a repo somewhere beneath it, or itself.
+        # Check: does $cur contain any .git within depth 3?
+        if [ -n "$(find "$cur" -mindepth 1 -maxdepth 3 -name '.git' \( -type d -o -type f \) 2>/dev/null | head -1)" ]; then
+            echo "$cur"
+            return 0
+        fi
+        cur="$(dirname "$cur")"
+    done
+    # Fallback: the start dir itself.
+    echo "$(cd "$start" && pwd)"
+}
+
+WORKSPACE_ROOT="${AGENT_WORKSPACE_ROOT:-$(find_workspace "$PWD")}"
+CURRENT_REPO="$(find_repo)"
+
+# --- helpers ---------------------------------------------------------------
+_child_repos() {
+    find "$WORKSPACE_ROOT" -mindepth 2 -maxdepth 3 -name ".git" \( -type d -o -type f \) \
+        ! -path "$WORKSPACE_ROOT/.agents/*" \
+        ! -path "$WORKSPACE_ROOT/.workspace-state/*" \
+        2>/dev/null \
+    | while IFS= read -r g; do dirname "$g"; done \
+    | sort -u
+}
+
+# Handoff lookup priority (all under <repo>/sessions/):
+#   1. .last-handoff          (plain pointer / short text — preferred)
+#   2. last-handoff.md        (markdown fallback, stripped of #/* markers)
+#   3. last-handoff.html      (html fallback, tags stripped)
+# No workspace or parent fallbacks — a repo always shows its own handoff, or none.
+find_handoff() {
+    local repo="$1"
+    local cand
+    for cand in "$repo/sessions/.last-handoff" \
+                "$repo/sessions/last-handoff.md" \
+                "$repo/sessions/last-handoff.html"; do
+        if [ -f "$cand" ]; then
+            echo "$cand"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Strip a handoff file to readable plain text. Handles both markdown and HTML:
+#  - remove <style>/<script> blocks entirely (they leak garbage when tags go)
+#  - remove remaining HTML tags
+#  - strip markdown # headings, * / - / > bullets, list/quote markers
+_strip_handoff() {
+    sed -e ':a' -e 'N' -e '$!ba' \
+        -e 's/<style[^>]*>.*<\/style>//gI' \
+        -e 's/<script[^>]*>.*<\/script>//gI' \
+        -e 's/<[^>]*>//g' \
+        -e 's/^[[:space:]]*#\+[[:space:]]*//' \
+        -e 's/^[[:space:]]*[>*+-][[:space:]]*//' \
+        -e 's/^[[:space:]]*[0-9]*[.)][[:space:]]*//' \
+        -e 's/^[[:space:]]*\[\([^]]*\)\]([^)]*)[[:space:]]*/\1 /' \
+        "$@" \
+    | grep -v '^[[:space:]]*$'
+}
+
+_handoff_summary() {
+    local h="$1"
+    if [ -f "$h" ]; then
+        local head_line
+        case "$h" in
+            *.md|*.html)
+                # Strip markup, take first non-empty line as the title.
+                head_line="$(_strip_handoff "$h" 2>/dev/null \
+                    | grep -m1 -v '^[[:space:]]*$' \
+                    | sed 's/^#\+ *//')"
+                ;;
+            *)
+                head_line="$(head -n 1 "$h" 2>/dev/null | sed 's/^#\+ *//')"
+                ;;
+        esac
+        echo "  📄 ${head_line:-$(basename "$h")}"
+        echo "     $h"
+    else
+        echo "  (no handoff)"
+    fi
+}
+
+# --- git report ------------------------------------------------------------
+git_report() {
+    local repo="$1"
+    local label="$2"
+    echo "### Git Snapshot ($label)"
+    if ! git -C "$repo" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        echo "Not a git repository"
+        return
+    fi
+    local br staged unstaged untracked last
+    br="$(git -C "$repo" branch --show-current 2>/dev/null || echo 'unknown')"
+    staged="$(git -C "$repo" diff --cached --name-only 2>/dev/null | wc -l | tr -d ' ')"
+    unstaged="$(git -C "$repo" diff --name-only 2>/dev/null | wc -l | tr -d ' ')"
+    untracked="$(git -C "$repo" ls-files --others --exclude-standard 2>/dev/null | wc -l | tr -d ' ')"
+    last="$(git -C "$repo" log -n 1 --oneline 2>/dev/null || echo 'N/A')"
+    echo "- Branch: $br"
+    echo "- Staged: $staged | Unstaged: $unstaged | Untracked: $untracked"
+    echo "- Last commit: $last"
+    echo ""
+    echo "### Recent Commits (last 10)"
+    git -C "$repo" log -n 10 --oneline 2>/dev/null || echo 'N/A'
+    echo ""
+    echo "### Git Status (short)"
+    local status
+    status="$(git -C "$repo" status --short 2>/dev/null)"
+    if [ -n "$status" ]; then
+        printf "%s\n" "$status" | head -20
+    else
+        echo "Working tree clean"
+    fi
+    echo ""
+    if [ "$unstaged" -gt 0 ]; then
+        echo "### Unstaged Changes (stat)"
+        git -C "$repo" diff --stat 2>/dev/null
+        echo ""
+        echo "### Unstaged Diff (first 200 lines)"
+        git -C "$repo" diff 2>/dev/null | head -n 200
+        echo ""
+    fi
+    if [ "$staged" -gt 0 ]; then
+        echo "### Staged Changes (stat)"
+        git -C "$repo" diff --cached --stat 2>/dev/null
+        echo ""
+        echo "### Staged Diff (first 200 lines)"
+        git -C "$repo" diff --cached 2>/dev/null | head -n 200
+        echo ""
+    fi
+}
+
+# --- commands --------------------------------------------------------------
+cmd_status() {
+    local repo="${1:-$CURRENT_REPO}"
+    if [ -z "$repo" ]; then
+        echo "Not inside a git repository. Run from a repo, or: situ status <path>"
+        return 1
+    fi
+    local h
+    h="$(find_handoff "$repo")" || h=""
+    echo "## 📊 Situation — $repo"
+    echo ""
+    if [ -n "$h" ]; then
+        echo "### Last handoff"
+        _handoff_summary "$h"
+        echo ""
+        echo "--- preview (20 lines) ---"
+        case "$h" in
+            *.md|*.html) _strip_handoff "$h" | head -n 20 ;;
+            *) head -n 20 "$h" ;;
+        esac
+        echo ""
+    else
+        echo "No handoff found for this repo."
+        echo ""
+    fi
+    git_report "$repo" "$(basename "$repo")"
+}
+
+cmd_handoffs() {
+    echo "## 🧭 Handoffs across $WORKSPACE_ROOT"
+    echo ""
+    local found=0
+    local repo
+    while IFS= read -r repo; do
+        [ -z "$repo" ] && continue
+        found=1
+        echo "### $(basename "$repo") ($repo)"
+        echo "  branch: $(git -C "$repo" branch --show-current 2>/dev/null || echo unknown)"
+        echo "  last:   $(git -C "$repo" log -n 1 --oneline 2>/dev/null || echo 'no commits')"
+        local h
+        h="$(find_handoff "$repo")" || h=""
+        if [ -n "$h" ]; then
+            _handoff_summary "$h"
+        else
+            echo "  (no handoff)"
+        fi
+        echo ""
+    done < <(_child_repos)
+    if [ "$found" = "0" ]; then
+        echo "No child repos found under $WORKSPACE_ROOT."
+    fi
+}
+
+cmd_handoff() {
+    local repo="${1:-$CURRENT_REPO}"
+    if [ -z "$repo" ]; then
+        echo "No repo specified and not inside a git repo."
+        return 1
+    fi
+    local h
+    h="$(find_handoff "$repo")" || { echo "No handoff found for $repo"; return 1; }
+    case "$h" in
+        *.md|*.html)
+            _strip_handoff "$h"
+            ;;
+        *)
+            cat "$h"
+            ;;
+    esac
+}
+
+cmd_help() {
+    echo "situ — repo-aware situation CLI"
+    echo ""
+    echo "Usage:"
+    echo "  situ                     project report (in a repo) or workspace overview"
+    echo "  situ status [repo]       git + handoff report"
+    echo "  situ handoffs            every repo under the workspace + latest handoff"
+    echo "  situ handoff [repo]      full handoff of the current or named repo"
+    echo "  situ --version           version"
+    echo ""
+    echo "Workspace: AGENT_WORKSPACE_ROOT overrides auto-detection."
+}
+
+# --- dispatch --------------------------------------------------------------
+case "${1:-}" in
+    --version|-v)
+        echo "situ 0.1.0"
+        ;;
+    help|--help|-h)
+        cmd_help
+        ;;
+    handoffs)
+        cmd_handoffs
+        ;;
+    handoff)
+        shift 2>/dev/null || true
+        cmd_handoff "${1:-}"
+        ;;
+    status)
+        shift 2>/dev/null || true
+        cmd_status "${1:-}"
+        ;;
+    workspace-root)
+        echo "$WORKSPACE_ROOT"
+        ;;
+    *)
+        # No subcommand: repo-aware default.
+        if [ -n "$CURRENT_REPO" ]; then
+            cmd_status "$CURRENT_REPO"
+        else
+            # Workspace overview — count child repos.
+            count=0
+            while IFS= read -r _; do count=$((count + 1)); done < <(_child_repos)
+            if [ "$count" -ge 2 ]; then
+                echo "## 📊 Workspace Overview — $WORKSPACE_ROOT"
+                echo ""
+                cmd_handoffs
+            else
+                cmd_help
+            fi
+        fi
+        ;;
+esac
