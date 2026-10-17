@@ -1,0 +1,5 @@
+# .agents/ holds the toolchain agents run with, not GRAPHEINA's own code.
+# Linguist counts bytes, so the bundled Python and Shell tools would otherwise
+# outweigh the Rust and make this repository read as Python. Mark them as
+# documentation and the real language comes back: Rust.
+.agents/** linguist-documentation
